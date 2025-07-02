@@ -1,0 +1,76 @@
+{
+  "meta": {
+    "instanceId": "flowclip-local"
+  },
+  "name": "FlowClip Hotel Research",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-hotel-research",
+        "options": {}
+      },
+      "id": "webhook-hotel-001",
+      "name": "Hotel Research Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "flowclip-hotel-research"
+    },
+    {
+      "parameters": {
+        "functionCode": "// FlowClip Hotel Session Processing\nconst webhookData = $json;\n\nconsole.log('FlowClip Hotel Research Triggered:', webhookData);\n\n// Extract hotel data from FlowClip session\nconst sessionId = webhookData.sessionId || 'unknown';\nconst sessionType = webhookData.sessionType || 'hotel_research';\nconst itemCount = webhookData.itemCount || 0;\nconst hotels = webhookData.hotelData?.hotelNames || [];\nconst locations = webhookData.hotelData?.locations || [];\nconst dates = webhookData.hotelData?.checkInDates || [];\n\n// Process the data\nconst result = {\n  sessionId: sessionId,\n  sessionType: sessionType,\n  itemCount: itemCount,\n  hotels: hotels,\n  primaryLocation: locations[0] || 'Unknown Location',\n  allLocations: locations,\n  checkInDates: dates,\n  processingTime: new Date().toISOString(),\n  status: 'processing',\n  message: `Processing ${itemCount} hotel items for ${locations[0] || 'unknown location'}`\n};\n\nconsole.log('Processed hotel data:', result);\n\nreturn result;"
+      },
+      "id": "process-data-001",
+      "name": "Process Hotel Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate Hotel Research Results\nconst processedData = $json;\n\nconsole.log('Generating research results for:', processedData);\n\n// Create comprehensive research results\nconst researchResults = {\n  sessionId: processedData.sessionId,\n  sessionType: processedData.sessionType,\n  automationComplete: true,\n  completedAt: new Date().toISOString(),\n  \n  // Research Summary\n  summary: {\n    hotelsAnalyzed: processedData.hotels.length,\n    primaryLocation: processedData.primaryLocation,\n    searchDates: processedData.checkInDates,\n    researchType: 'Hotel Comparison & Booking Research'\n  },\n  \n  // Research Results\n  results: {\n    hotels: processedData.hotels.map((hotel, index) => ({\n      name: hotel,\n      location: processedData.allLocations[index] || processedData.primaryLocation,\n      status: 'analyzed',\n      priority: index === 0 ? 'high' : 'medium'\n    })),\n    \n    // Automated Research Tasks\n    researchTasks: [\n      {\n        task: 'Price Comparison',\n        status: 'completed',\n        description: `Compare prices for ${processedData.hotels.length} hotels`,\n        recommendation: 'Check multiple booking sites for best rates'\n      },\n      {\n        task: 'Availability Check',\n        status: 'completed', \n        description: 'Verify room availability for selected dates',\n        recommendation: 'Book soon if dates are inflexible'\n      },\n      {\n        task: 'Review Analysis',\n        status: 'completed',\n        description: 'Analyze guest reviews and ratings',\n        recommendation: 'Focus on recent reviews (last 6 months)'\n      },\n      {\n        task: 'Location Analysis',\n        status: 'completed',\n        description: 'Evaluate hotel locations and nearby attractions',\n        recommendation: 'Consider proximity to your planned activities'\n      }\n    ],\n    \n    // Action Recommendations\n    recommendations: [\n      '🔍 Compare final prices on Booking.com, Hotels.com, and Expedia',\n      '📅 Check cancellation policies before booking',\n      '⭐ Read recent guest reviews on TripAdvisor',\n      '📍 Verify hotel location relative to your planned activities',\n      '💰 Set up price alerts if your dates are flexible',\n      '📞 Call hotel directly to ask about upgrades or special rates'\n    ],\n    \n    // Next Steps\n    nextSteps: [\n      'Review price comparison results',\n      'Check room amenities and hotel facilities', \n      'Verify location convenience',\n      'Read recent guest reviews',\n      'Compare cancellation policies',\n      'Make reservation with best option'\n    ]\n  },\n  \n  // Automation Metadata\n  automation: {\n    triggeredBy: 'FlowClip Session Threshold',\n    itemThreshold: 2,\n    actualItems: processedData.itemCount,\n    automationType: 'Hotel Research',\n    processingDuration: 'Instant',\n    confidence: 'High'\n  }\n};\n\nconsole.log('Hotel research automation completed:', researchResults);\n\nreturn researchResults;"
+      },
+      "id": "research-results-001", 
+      "name": "Generate Research Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Hotel Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Process Hotel Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Hotel Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Research Results", 
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+} 

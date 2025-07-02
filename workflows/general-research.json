@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "instanceId": "flowclip-local"
+  },
+  "name": "FlowClip General Research",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-general-research",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "webhook-general",
+      "name": "General Research Trigger", 
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "flowclip-general-research"
+    },
+    {
+      "parameters": {
+        "functionCode": "// FlowClip General Research Processing - NO MOCK DATA\nconst data = $json;\n\nconsole.log('🔍 FlowClip General Research Triggered!', data);\n\n// Extract actual research information from session\nconst topics = data.generalData?.researchTopics || [];\nconst entities = data.generalData?.namedEntities || [];\nconst questions = data.generalData?.questions || [];\nconst facts = data.generalData?.factualClaims || [];\nconst itemCount = data.itemCount || 0;\n\n// Return only actual session data with no mock content\nconst result = {\n  sessionId: data.sessionId,\n  sessionType: data.sessionType,\n  itemCount: itemCount,\n  \n  researchData: {\n    topics: topics,\n    entities: entities,\n    questions: questions,\n    facts: facts,\n    topicCount: topics.length,\n    entityCount: entities.length,\n    questionCount: questions.length\n  },\n  \n  researchComplete: true,\n  completedAt: new Date().toISOString(),\n  \n  // Only include insights if actual data was found\n  insights: topics.length > 0 ? [`Found ${topics.length} topics and ${entities.length} entities to research`] : ['No research data found in session'],\n  \n  automation: {\n    type: 'General Research Automation',\n    triggeredBy: 'FlowClip Session Threshold',\n    itemThreshold: 3,\n    actualItems: itemCount,\n    hasData: topics.length > 0 || entities.length > 0\n  }\n};\n\nconsole.log('🎯 General research automation completed with actual data only:', result);\n\nreturn result;"
+      },
+      "id": "process-general",
+      "name": "Process Research Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "General Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Process Research Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "2"
+} 

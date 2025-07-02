@@ -1,0 +1,312 @@
+{
+  "workflows": [
+    {
+      "name": "FlowClip Hotel Research Automation",
+      "description": "Automates hotel research tasks when hotel research sessions reach threshold",
+      "webhook_path": "/flowclip-hotel-research",
+      "trigger_threshold": 2,
+      "nodes": [
+        {
+          "type": "webhook",
+          "name": "FlowClip Hotel Research Webhook",
+          "parameters": {
+            "path": "flowclip-hotel-research",
+            "httpMethod": "POST"
+          }
+        },
+        {
+          "type": "function",
+          "name": "Process Hotel Data",
+          "parameters": {
+            "functionCode": "// Extract hotel information from FlowClip session\nconst sessionData = $json;\n\nconst hotels = sessionData.hotelData.hotelNames || [];\nconst location = sessionData.hotelData.locations[0] || 'Unknown';\nconst dates = sessionData.hotelData.checkInDates || [];\n\nreturn [{\n  hotels: hotels,\n  location: location,\n  searchDates: dates,\n  sessionId: sessionData.sessionId,\n  automationTasks: sessionData.automationTasks\n}];"
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search Hotel Prices - Booking.com",
+          "parameters": {
+            "method": "GET",
+            "url": "https://distribution-xml.booking.com/json/bookings.getHotelAvailability",
+            "options": {
+              "qs": {
+                "hotel_ids": "={{$json.hotels.join(',')}}",
+                "checkin": "={{$json.searchDates[0] || '2024-06-01'}}",
+                "checkout": "={{$json.searchDates[1] || '2024-06-03'}}",
+                "currency": "USD"
+              }
+            }
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Get Hotel Reviews - TripAdvisor",
+          "parameters": {
+            "method": "GET",
+            "url": "https://api.tripadvisor.com/api/partner/2.0/search/{{$json.location}}",
+            "options": {
+              "headers": {
+                "X-TripAdvisor-API-Key": "YOUR_TRIPADVISOR_API_KEY"
+              }
+            }
+          }
+        },
+        {
+          "type": "function",
+          "name": "Compile Hotel Research Results",
+          "parameters": {
+            "functionCode": "// Combine all research results\nconst sessionData = $('Process Hotel Data').first().$json;\nconst bookingData = $('Search Hotel Prices - Booking.com').first().$json;\nconst reviewsData = $('Get Hotel Reviews - TripAdvisor').first().$json;\n\nreturn [{\n  sessionId: sessionData.sessionId,\n  researchComplete: true,\n  results: {\n    hotels: sessionData.hotels,\n    location: sessionData.location,\n    pricing: bookingData,\n    reviews: reviewsData,\n    automationTasks: sessionData.automationTasks\n  },\n  summary: `Research completed for ${sessionData.hotels.length} hotels in ${sessionData.location}`,\n  recommendations: [\n    'Compare prices across multiple booking sites',\n    'Check recent reviews for service quality',\n    'Verify amenities match your requirements'\n  ]\n}];"
+          }
+        },
+        {
+          "type": "webhook",
+          "name": "Send Results Back to FlowClip",
+          "parameters": {
+            "method": "POST",
+            "url": "http://localhost:YOUR_FLOWCLIP_PORT/api/automation-results",
+            "body": "={{$json}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "FlowClip Product Research Automation",
+      "description": "Automates product research and price tracking",
+      "webhook_path": "/flowclip-product-research",
+      "trigger_threshold": 3,
+      "nodes": [
+        {
+          "type": "webhook",
+          "name": "FlowClip Product Research Webhook",
+          "parameters": {
+            "path": "flowclip-product-research",
+            "httpMethod": "POST"
+          }
+        },
+        {
+          "type": "function",
+          "name": "Process Product Data",
+          "parameters": {
+            "functionCode": "const sessionData = $json;\n\nconst products = sessionData.productData.productNames || [];\nconst categories = sessionData.productData.categories || [];\nconst specs = sessionData.productData.specifications || [];\n\nreturn [{\n  products: products,\n  categories: categories,\n  specifications: specs,\n  sessionId: sessionData.sessionId,\n  automationTasks: sessionData.automationTasks\n}];"
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search Amazon Prices",
+          "parameters": {
+            "method": "GET",
+            "url": "https://api.amazon.com/products/search",
+            "options": {
+              "qs": {
+                "keywords": "={{$json.products.join(' ')}}",
+                "category": "={{$json.categories[0] || 'All'}}",
+                "sort": "price-asc-rank"
+              },
+              "headers": {
+                "Authorization": "Bearer YOUR_AMAZON_API_KEY"
+              }
+            }
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search eBay Listings",
+          "parameters": {
+            "method": "GET",
+            "url": "https://api.ebay.com/buy/browse/v1/item_summary/search",
+            "options": {
+              "qs": {
+                "q": "={{$json.products.join(' ')}}",
+                "sort": "price",
+                "limit": "10"
+              },
+              "headers": {
+                "Authorization": "Bearer YOUR_EBAY_API_KEY"
+              }
+            }
+          }
+        },
+        {
+          "type": "function",
+          "name": "Compare Prices and Features",
+          "parameters": {
+            "functionCode": "const productData = $('Process Product Data').first().$json;\nconst amazonData = $('Search Amazon Prices').first().$json;\nconst ebayData = $('Search eBay Listings').first().$json;\n\n// Price comparison logic\nconst amazonPrices = amazonData.products?.map(p => p.price) || [];\nconst ebayPrices = ebayData.itemSummaries?.map(p => p.price?.value) || [];\n\nconst bestPrice = Math.min(...amazonPrices, ...ebayPrices);\nconst avgPrice = (amazonPrices.concat(ebayPrices).reduce((a, b) => a + b, 0)) / (amazonPrices.length + ebayPrices.length);\n\nreturn [{\n  sessionId: productData.sessionId,\n  researchComplete: true,\n  results: {\n    products: productData.products,\n    bestPrice: bestPrice,\n    averagePrice: avgPrice,\n    amazonListings: amazonData.products || [],\n    ebayListings: ebayData.itemSummaries || [],\n    priceComparison: {\n      lowestPrice: bestPrice,\n      savings: avgPrice - bestPrice,\n      recommendedSource: bestPrice === Math.min(...amazonPrices) ? 'Amazon' : 'eBay'\n    }\n  },\n  recommendations: [\n    `Best price found: $${bestPrice}`,\n    `Average savings: $${(avgPrice - bestPrice).toFixed(2)}`,\n    'Set up price alerts for future monitoring'\n  ]\n}];"
+          }
+        }
+      ]
+    },
+    {
+      "name": "FlowClip Academic Research Automation",
+      "description": "Automates academic research and paper discovery",
+      "webhook_path": "/flowclip-academic-research",
+      "trigger_threshold": 4,
+      "nodes": [
+        {
+          "type": "webhook",
+          "name": "FlowClip Academic Research Webhook",
+          "parameters": {
+            "path": "flowclip-academic-research",
+            "httpMethod": "POST"
+          }
+        },
+        {
+          "type": "function",
+          "name": "Process Academic Data",
+          "parameters": {
+            "functionCode": "const sessionData = $json;\n\nconst topics = sessionData.academicData.researchTopics || [];\nconst authors = sessionData.academicData.authors || [];\nconst keywords = sessionData.academicData.keywords || [];\n\nreturn [{\n  researchTopics: topics,\n  authors: authors,\n  keywords: keywords,\n  sessionId: sessionData.sessionId,\n  automationTasks: sessionData.automationTasks\n}];"
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search arXiv Papers",
+          "parameters": {
+            "method": "GET",
+            "url": "http://export.arxiv.org/api/query",
+            "options": {
+              "qs": {
+                "search_query": "={{$json.keywords.join(' OR ')}}",
+                "start": "0",
+                "max_results": "20",
+                "sortBy": "relevance",
+                "sortOrder": "descending"
+              }
+            }
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search Google Scholar",
+          "parameters": {
+            "method": "GET",
+            "url": "https://serpapi.com/search",
+            "options": {
+              "qs": {
+                "engine": "google_scholar",
+                "q": "={{$json.researchTopics.join(' ')}}",
+                "api_key": "YOUR_SERPAPI_KEY"
+              }
+            }
+          }
+        },
+        {
+          "type": "function",
+          "name": "Analyze Research Results",
+          "parameters": {
+            "functionCode": "const academicData = $('Process Academic Data').first().$json;\nconst arxivData = $('Search arXiv Papers').first().$json;\nconst scholarData = $('Search Google Scholar').first().$json;\n\n// Parse arXiv XML response\nconst papers = [];\nif (arxivData.feed && arxivData.feed.entry) {\n  arxivData.feed.entry.forEach(entry => {\n    papers.push({\n      title: entry.title,\n      authors: entry.author ? entry.author.map(a => a.name) : [],\n      abstract: entry.summary,\n      published: entry.published,\n      url: entry.id,\n      source: 'arXiv'\n    });\n  });\n}\n\n// Add Google Scholar results\nif (scholarData.organic_results) {\n  scholarData.organic_results.forEach(result => {\n    papers.push({\n      title: result.title,\n      authors: result.publication_info?.authors || [],\n      snippet: result.snippet,\n      citedBy: result.inline_links?.cited_by?.total || 0,\n      url: result.link,\n      source: 'Google Scholar'\n    });\n  });\n}\n\nreturn [{\n  sessionId: academicData.sessionId,\n  researchComplete: true,\n  results: {\n    topics: academicData.researchTopics,\n    totalPapers: papers.length,\n    papers: papers.slice(0, 10), // Top 10 results\n    keywordCoverage: academicData.keywords,\n    sources: ['arXiv', 'Google Scholar']\n  },\n  recommendations: [\n    `Found ${papers.length} relevant papers`,\n    'Review highly cited papers first',\n    'Check for recent publications in the last 2 years',\n    'Consider setting up citation alerts'\n  ]\n}];"
+          }
+        }
+      ]
+    },
+    {
+      "name": "FlowClip General Research Automation",
+      "description": "General web research and fact-checking automation",
+      "webhook_path": "/flowclip-general-research",
+      "trigger_threshold": 3,
+      "nodes": [
+        {
+          "type": "webhook",
+          "name": "FlowClip General Research Webhook",
+          "parameters": {
+            "path": "flowclip-general-research",
+            "httpMethod": "POST"
+          }
+        },
+        {
+          "type": "function",
+          "name": "Process General Research Data",
+          "parameters": {
+            "functionCode": "const sessionData = $json;\n\nconst topics = sessionData.generalData.topics || [];\nconst entities = sessionData.generalData.entities || [];\nconst keywords = sessionData.generalData.keywords || [];\nconst questions = sessionData.generalData.questions || [];\n\nreturn [{\n  topics: topics,\n  entities: entities,\n  keywords: keywords,\n  questions: questions,\n  sessionId: sessionData.sessionId,\n  automationTasks: sessionData.automationTasks\n}];"
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search Google Web",
+          "parameters": {
+            "method": "GET",
+            "url": "https://serpapi.com/search",
+            "options": {
+              "qs": {
+                "engine": "google",
+                "q": "={{$json.topics.join(' ')}}",
+                "num": "10",
+                "api_key": "YOUR_SERPAPI_KEY"
+              }
+            }
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Search Wikipedia",
+          "parameters": {
+            "method": "GET",
+            "url": "https://en.wikipedia.org/api/rest_v1/page/summary/{{$json.entities[0] || $json.topics[0]}}",
+            "options": {
+              "headers": {
+                "User-Agent": "FlowClip-Research-Bot/1.0"
+              }
+            }
+          }
+        },
+        {
+          "type": "http-request",
+          "name": "Fact Check with Snopes",
+          "parameters": {
+            "method": "GET",
+            "url": "https://www.snopes.com/api/v1/snopes/search",
+            "options": {
+              "qs": {
+                "q": "={{$json.topics.join(' ')}}",
+                "limit": "5"
+              },
+              "headers": {
+                "Authorization": "Bearer YOUR_SNOPES_API_KEY"
+              }
+            }
+          }
+        },
+        {
+          "type": "function",
+          "name": "Compile Research Summary",
+          "parameters": {
+            "functionCode": "const researchData = $('Process General Research Data').first().$json;\nconst googleData = $('Search Google Web').first().$json;\nconst wikiData = $('Search Wikipedia').first().$json;\nconst factCheckData = $('Fact Check with Snopes').first().$json;\n\nconst webResults = googleData.organic_results?.slice(0, 5) || [];\nconst wikiSummary = wikiData.extract || 'No Wikipedia summary available';\nconst factChecks = factCheckData.results || [];\n\nreturn [{\n  sessionId: researchData.sessionId,\n  researchComplete: true,\n  results: {\n    topics: researchData.topics,\n    webResults: webResults.map(r => ({\n      title: r.title,\n      snippet: r.snippet,\n      url: r.link,\n      source: r.displayed_link\n    })),\n    wikipediaSummary: wikiSummary,\n    factChecks: factChecks.map(f => ({\n      claim: f.claim,\n      rating: f.rating,\n      url: f.snopes_url\n    })),\n    questionsAnswered: researchData.questions.length,\n    credibilityScore: factChecks.length > 0 ? 'Verified' : 'Needs verification'\n  },\n  recommendations: [\n    `Found ${webResults.length} relevant web sources`,\n    wikiData.extract ? 'Wikipedia summary available' : 'No Wikipedia entry found',\n    factChecks.length > 0 ? `${factChecks.length} fact-checks found` : 'Consider additional fact-checking',\n    'Cross-reference multiple sources for accuracy'\n  ]\n}];"
+          }
+        }
+      ]
+    }
+  ],
+  "setup_instructions": {
+    "requirements": [
+      "N8N instance (self-hosted or cloud)",
+      "API keys for external services (optional but recommended)",
+      "FlowClip running with N8N integration enabled"
+    ],
+    "configuration": {
+      "n8n_endpoint": "Set N8N_WEBHOOK_ENDPOINT environment variable",
+      "api_key": "Set N8N_API_KEY environment variable (optional)",
+      "webhook_urls": {
+        "hotel_research": "http://your-n8n-instance:5678/webhook/flowclip-hotel-research",
+        "product_research": "http://your-n8n-instance:5678/webhook/flowclip-product-research",
+        "academic_research": "http://your-n8n-instance:5678/webhook/flowclip-academic-research",
+        "general_research": "http://your-n8n-instance:5678/webhook/flowclip-general-research"
+      }
+    },
+    "api_keys_needed": {
+      "optional_services": [
+        "TripAdvisor API Key (for hotel reviews)",
+        "Amazon Product Advertising API (for product prices)",
+        "eBay API Key (for product listings)",
+        "SerpAPI Key (for Google/Scholar search)",
+        "Snopes API Key (for fact-checking)"
+      ],
+      "free_alternatives": [
+        "Use web scraping nodes instead of API calls",
+        "Implement rate-limited requests",
+        "Use public APIs where available"
+      ]
+    },
+    "testing": {
+      "test_webhook": "Use webhook.site or similar for testing",
+      "local_testing": "Run N8N locally with ngrok for external access",
+      "workflow_validation": "Test each workflow with sample FlowClip session data"
+    }
+  }
+} 

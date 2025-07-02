@@ -1,0 +1,185 @@
+{
+  "meta": {
+    "instanceId": "flowclip-scraping"
+  },
+  "name": "FlowClip Product Research - Web Scraping",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-product-research",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "webhook-product",
+      "name": "Product Research Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract and prepare product search data\nconst data = $json;\nconst products = data.productData?.productNames || [];\nconst categories = data.productData?.categories || [];\nconst brands = data.productData?.brands || [];\n\nreturn {\n  sessionId: data.sessionId,\n  products: products,\n  categories: categories,\n  brands: brands,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "prepare-product-searches",
+      "name": "Prepare Product Searches",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "method": "GET",
+        "qs": {
+          "q": "={{ ($json.products[0] || 'product') + ' site:amazon.com price' }}",
+          "num": "10"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          }
+        },
+        "headers": {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      },
+      "id": "amazon-search",
+      "name": "Search Amazon Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "method": "GET",
+        "qs": {
+          "q": "={{ ($json.products[0] || 'product') + ' reddit review' }}",
+          "num": "10"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          }
+        },
+        "headers": {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      },
+      "id": "reddit-product-reviews",
+      "name": "Search Reddit Reviews",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "method": "GET",
+        "qs": {
+          "q": "={{ ($json.products[0] || 'product') + ' deal discount coupon' }}",
+          "num": "10"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          }
+        },
+        "headers": {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      },
+      "id": "deal-search",
+      "name": "Search for Deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse and extract product information from scraped data - NO MOCK DATA\nconst amazonData = $('amazon-search').first().json || '';\nconst redditData = $('reddit-product-reviews').first().json || '';\nconst dealData = $('deal-search').first().json || '';\nconst originalData = $('prepare-product-searches').first().json;\n\n// Extract actual prices from scraped HTML\nconst extractPrices = (html) => {\n  const priceMatches = html.match(/\\$\\d{1,4}(?:,\\d{3})*(?:\\.\\d{2})?/g) || [];\n  return priceMatches.map(p => parseInt(p.replace(/[$,]/g, ''))).filter(p => p > 0 && p < 50000);\n};\n\n// Extract actual ratings from scraped HTML\nconst extractRatings = (html) => {\n  const ratingMatches = html.match(/\\d\\.\\d(?:\\s*(?:star|rating|out of))/gi) || [];\n  return ratingMatches.slice(0, 5);\n};\n\n// Extract actual deal information from scraped HTML\nconst extractDeals = (html) => {\n  const discountMatches = html.match(/\\d{1,2}%\\s*off/gi) || [];\n  const couponMatches = html.match(/(?:code|coupon|promo)\\s*:?\\s*[A-Z0-9]{3,}/gi) || [];\n  return {\n    discounts: discountMatches.slice(0, 3),\n    coupons: couponMatches.slice(0, 2)\n  };\n};\n\n// Extract actual store mentions from scraped HTML\nconst extractStores = (html) => {\n  const storeMatches = html.match(/(?:amazon|walmart|target|best buy|costco|newegg)\\.com/gi) || [];\n  return [...new Set(storeMatches.map(s => s.toLowerCase()))].slice(0, 5);\n};\n\n// Process scraped data - only actual results\nconst prices = extractPrices(amazonData + dealData);\nconst ratings = extractRatings(amazonData + redditData);\nconst deals = extractDeals(dealData);\nconst stores = extractStores(amazonData + dealData);\n\n// Return only actual scraped data with no mock content\nconst result = {\n  sessionId: originalData.sessionId,\n  automationType: 'Web Scraping Product Research',\n  completedAt: new Date().toISOString(),\n  products: originalData.products,\n  categories: originalData.categories,\n  brands: originalData.brands,\n  \n  // Only include data that was actually found\n  scrapedData: {\n    prices: prices,\n    priceCount: prices.length,\n    averagePrice: prices.length > 0 ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : null,\n    lowestPrice: prices.length > 0 ? Math.min(...prices) : null,\n    highestPrice: prices.length > 0 ? Math.max(...prices) : null,\n    \n    ratings: ratings,\n    ratingCount: ratings.length,\n    \n    deals: {\n      discounts: deals.discounts,\n      coupons: deals.coupons,\n      totalDeals: deals.discounts.length + deals.coupons.length\n    },\n    \n    stores: stores,\n    storeCount: stores.length\n  },\n  \n  // Only return success status if data was actually found\n  success: prices.length > 0 || ratings.length > 0 || deals.discounts.length > 0 || deals.coupons.length > 0,\n  dataFound: {\n    hasPrices: prices.length > 0,\n    hasRatings: ratings.length > 0,\n    hasDeals: deals.discounts.length > 0 || deals.coupons.length > 0,\n    hasStores: stores.length > 0\n  }\n};\n\n// Only log if actual data was found\nif (result.success) {\n  console.log('🛒 Actual product data scraped:', {\n    prices: prices.length,\n    ratings: ratings.length,\n    deals: deals.discounts.length + deals.coupons.length,\n    stores: stores.length\n  });\n} else {\n  console.log('🛒 No product data found in scraped results');\n}\n\nreturn result;"
+      },
+      "id": "parse-product-results",
+      "name": "Parse Product Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Product Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Product Searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Product Searches": {
+      "main": [
+        [
+          {
+            "node": "Search Amazon Prices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Reddit Reviews",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search for Deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Amazon Prices": {
+      "main": [
+        [
+          {
+            "node": "Parse Product Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Reddit Reviews": {
+      "main": [
+        [
+          {
+            "node": "Parse Product Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search for Deals": {
+      "main": [
+        [
+          {
+            "node": "Parse Product Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "4"
+} 

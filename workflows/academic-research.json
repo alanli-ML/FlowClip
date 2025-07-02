@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "instanceId": "flowclip-local"
+  },
+  "name": "FlowClip Academic Research",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-academic-research",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "webhook-academic",
+      "name": "Academic Research Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "flowclip-academic-research"
+    },
+    {
+      "parameters": {
+        "functionCode": "// FlowClip Academic Research Processing - NO MOCK DATA\nconst data = $json;\n\nconsole.log('📚 FlowClip Academic Research Triggered!', data);\n\n// Extract actual academic information from session\nconst topics = data.academicData?.researchTopics || [];\nconst papers = data.academicData?.paperTitles || [];\nconst authors = data.academicData?.authors || [];\nconst keywords = data.academicData?.keywords || [];\nconst institutions = data.academicData?.institutions || [];\nconst itemCount = data.itemCount || 0;\n\n// Return only actual session data with no mock content\nconst result = {\n  sessionId: data.sessionId,\n  sessionType: data.sessionType,\n  itemCount: itemCount,\n  \n  academicData: {\n    topics: topics,\n    papers: papers,\n    authors: authors,\n    keywords: keywords,\n    institutions: institutions,\n    topicCount: topics.length,\n    paperCount: papers.length,\n    authorCount: authors.length\n  },\n  \n  researchComplete: true,\n  completedAt: new Date().toISOString(),\n  \n  // Only include insights if actual data was found\n  insights: topics.length > 0 ? [`Found ${topics.length} research topics and ${papers.length} papers`] : ['No academic data found in session'],\n  \n  automation: {\n    type: 'Academic Research Automation',\n    triggeredBy: 'FlowClip Session Threshold',\n    itemThreshold: 4,\n    actualItems: itemCount,\n    hasData: topics.length > 0 || papers.length > 0\n  }\n};\n\nconsole.log('🎯 Academic research automation completed with actual data only:', result);\n\nreturn result;"
+      },
+      "id": "process-academic",
+      "name": "Process Academic Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Academic Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Process Academic Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "2"
+} 

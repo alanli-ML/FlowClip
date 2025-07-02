@@ -1,0 +1,185 @@
+{
+  "meta": {
+    "instanceId": "flowclip-scraping"
+  },
+  "name": "FlowClip Academic Research - Web Scraping",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-academic-research",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "webhook-academic",
+      "name": "Academic Research Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract and prepare academic search data\nconst data = $json;\nconst topics = data.academicData?.researchTopics || [];\nconst authors = data.academicData?.authors || [];\nconst keywords = data.academicData?.keywords || [];\n\nreturn {\n  sessionId: data.sessionId,\n  topics: topics,\n  authors: authors,\n  keywords: keywords,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "prepare-academic-searches",
+      "name": "Prepare Academic Searches",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://scholar.google.com/scholar",
+        "method": "GET",
+        "qs": {
+          "q": "={{ ($json.topics[0] || 'research') + ' ' + ($json.keywords[0] || '') }}",
+          "num": "10"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          }
+        },
+        "headers": {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      },
+      "id": "google-scholar",
+      "name": "Search Google Scholar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://en.wikipedia.org/w/api.php",
+        "method": "GET",
+        "qs": {
+          "action": "query",
+          "format": "json",
+          "list": "search",
+          "srsearch": "={{ $json.topics[0] || 'research' }}",
+          "srlimit": "5"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          }
+        }
+      },
+      "id": "wikipedia-search",
+      "name": "Search Wikipedia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "method": "GET",
+        "qs": {
+          "q": "={{ ($json.topics[0] || 'research') + ' reddit academic discussion' }}",
+          "num": "10"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          }
+        },
+        "headers": {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      },
+      "id": "reddit-academic",
+      "name": "Search Reddit Discussions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse and extract academic information from scraped data - NO MOCK DATA\nconst scholarData = $('google-scholar').first().json || '';\nconst wikipediaData = $('wikipedia-search').first().json || '';\nconst redditData = $('reddit-academic').first().json || '';\nconst originalData = $('prepare-academic-searches').first().json;\n\n// Extract actual paper titles from Google Scholar HTML\nconst extractPaperTitles = (html) => {\n  // Look for academic paper title patterns\n  const titleMatches = html.match(/<h3[^>]*class=\"gs_rt\"[^>]*>.*?<\\/h3>/gi) || [];\n  return titleMatches.map(title => \n    title.replace(/<[^>]*>/g, '').trim()\n  ).filter(title => title.length > 10).slice(0, 5);\n};\n\n// Extract actual citation counts from Google Scholar HTML\nconst extractCitations = (html) => {\n  const citationMatches = html.match(/Cited by \\d+/gi) || [];\n  return citationMatches.map(cite => \n    parseInt(cite.replace('Cited by ', ''))\n  ).filter(count => count > 0).slice(0, 5);\n};\n\n// Extract actual Wikipedia articles from API response\nconst extractWikipediaArticles = (jsonString) => {\n  try {\n    const data = JSON.parse(jsonString);\n    const articles = data?.query?.search || [];\n    return articles.map(article => ({\n      title: article.title,\n      snippet: article.snippet?.replace(/<[^>]*>/g, '') || '',\n      size: article.size\n    })).slice(0, 3);\n  } catch (e) {\n    return [];\n  }\n};\n\n// Extract actual Reddit discussion links\nconst extractRedditLinks = (html) => {\n  const redditMatches = html.match(/reddit\\.com[^\\s\"<>]+/gi) || [];\n  return [...new Set(redditMatches)].slice(0, 3);\n};\n\n// Process scraped data - only actual results\nconst paperTitles = extractPaperTitles(scholarData);\nconst citations = extractCitations(scholarData);\nconst wikiArticles = extractWikipediaArticles(wikipediaData);\nconst redditLinks = extractRedditLinks(redditData);\n\n// Return only actual scraped data with no mock content\nconst result = {\n  sessionId: originalData.sessionId,\n  automationType: 'Web Scraping Academic Research',\n  completedAt: new Date().toISOString(),\n  topics: originalData.topics,\n  authors: originalData.authors,\n  keywords: originalData.keywords,\n  \n  // Only include data that was actually found\n  scrapedData: {\n    papers: {\n      titles: paperTitles,\n      count: paperTitles.length,\n      citations: citations,\n      totalCitations: citations.length > 0 ? citations.reduce((a,b) => a+b, 0) : 0\n    },\n    \n    wikipedia: {\n      articles: wikiArticles,\n      count: wikiArticles.length\n    },\n    \n    discussions: {\n      redditLinks: redditLinks,\n      count: redditLinks.length\n    }\n  },\n  \n  // Only return success status if data was actually found\n  success: paperTitles.length > 0 || wikiArticles.length > 0 || redditLinks.length > 0,\n  dataFound: {\n    hasPapers: paperTitles.length > 0,\n    hasWikipedia: wikiArticles.length > 0,\n    hasDiscussions: redditLinks.length > 0\n  }\n};\n\n// Only log if actual data was found\nif (result.success) {\n  console.log('📚 Actual academic data scraped:', {\n    papers: paperTitles.length,\n    citations: citations.length,\n    wikipedia: wikiArticles.length,\n    reddit: redditLinks.length\n  });\n} else {\n  console.log('📚 No academic data found in scraped results');\n}\n\nreturn result;"
+      },
+      "id": "parse-academic-results",
+      "name": "Parse Academic Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Academic Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Academic Searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Academic Searches": {
+      "main": [
+        [
+          {
+            "node": "Search Google Scholar",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Wikipedia",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Reddit Discussions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Google Scholar": {
+      "main": [
+        [
+          {
+            "node": "Parse Academic Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Wikipedia": {
+      "main": [
+        [
+          {
+            "node": "Parse Academic Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Reddit Discussions": {
+      "main": [
+        [
+          {
+            "node": "Parse Academic Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "4"
+} 

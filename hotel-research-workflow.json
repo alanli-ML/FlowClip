@@ -1,0 +1,63 @@
+{
+  "name": "FlowClip Hotel Research",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-hotel-research",
+        "options": {}
+      },
+      "id": "webhook-hotel",
+      "name": "FlowClip Hotel Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process FlowClip hotel session data\nconst data = $json;\n\nreturn [{\n  sessionId: data.sessionId,\n  sessionType: data.sessionType,\n  hotels: data.hotelData?.hotelNames || [],\n  location: data.hotelData?.locations?.[0] || 'Unknown',\n  dates: data.hotelData?.checkInDates || [],\n  message: `Processing ${data.itemCount} hotel items from FlowClip`,\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "process-hotel-data",
+      "name": "Process Hotel Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate hotel research results\nconst input = $json;\n\nreturn [{\n  sessionId: input.sessionId,\n  researchComplete: true,\n  results: {\n    hotels: input.hotels,\n    location: input.location,\n    searchDates: input.dates,\n    recommendations: [\n      'Compare prices across booking sites',\n      'Check recent guest reviews',\n      'Verify amenities and location',\n      'Look for cancellation policies'\n    ],\n    nextSteps: [\n      'Book directly or through comparison sites',\n      'Set up price alerts for date flexibility',\n      'Read recent reviews on TripAdvisor'\n    ]\n  },\n  summary: `Hotel research completed for ${input.hotels.length} properties in ${input.location}`\n}];"
+      },
+      "id": "generate-results",
+      "name": "Generate Research Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "FlowClip Hotel Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Hotel Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Hotel Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Research Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "1"
+} 

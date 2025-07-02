@@ -1,0 +1,236 @@
+{
+  "meta": {
+    "instanceId": "flowclip-scraping"
+  },
+  "name": "FlowClip Hotel Research - Web Scraping (FIXED)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-hotel-research-fixed",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "webhook-hotel",
+      "name": "Hotel Research Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract and prepare hotel search data\nconst data = $json;\nconst hotels = data.hotelData?.hotelNames || [];\nconst location = data.hotelData?.locations?.[0] || '';\n\nreturn {\n  sessionId: data.sessionId,\n  hotels: hotels,\n  location: location,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "prepare-searches",
+      "name": "Prepare Search Queries", 
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "authentication": "none",
+        "requestMethod": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.location + ' hotels booking.com prices' }}"
+            },
+            {
+              "name": "num", 
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "google-booking",
+      "name": "Search Booking.com via Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "authentication": "none", 
+        "requestMethod": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ ($json.hotels[0] || $json.location) + ' hotel tripadvisor reviews' }}"
+            },
+            {
+              "name": "num",
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent", 
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "google-tripadvisor",
+      "name": "Search TripAdvisor Reviews",
+      "type": "n8n-nodes-base.httpRequest", 
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.google.com/search",
+        "authentication": "none",
+        "requestMethod": "GET", 
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ ($json.hotels[0] || $json.location) + ' hotel reddit review experience' }}"
+            },
+            {
+              "name": "num",
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "reddit-reviews",
+      "name": "Search Reddit Reviews",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse and extract hotel information from scraped HTML data\nconst bookingData = $('google-booking').first().json?.data || '';\nconst tripadvisorData = $('google-tripadvisor').first().json?.data || '';\nconst redditData = $('reddit-reviews').first().json?.data || '';\nconst originalData = $('prepare-searches').first().json;\n\nconsole.log('🔍 Processing scraped data:', {\n  bookingDataLength: bookingData.length,\n  tripadvisorDataLength: tripadvisorData.length,\n  redditDataLength: redditData.length\n});\n\n// Extract actual prices from scraped HTML\nconst extractPrices = (html) => {\n  if (!html || typeof html !== 'string') return [];\n  const priceMatches = html.match(/\\$\\d{1,4}(?:,\\d{3})*(?:\\.\\d{2})?/g) || [];\n  return priceMatches\n    .map(p => parseInt(p.replace(/[$,]/g, '')))\n    .filter(p => p > 50 && p < 2000) // Reasonable hotel price range\n    .slice(0, 10); // Limit results\n};\n\n// Extract actual ratings from scraped HTML\nconst extractRatings = (html) => {\n  if (!html || typeof html !== 'string') return [];\n  const ratingMatches = html.match(/\\d\\.\\d(?:\\s*(?:star|rating|out of))/gi) || [];\n  return ratingMatches.slice(0, 5);\n};\n\n// Extract actual Reddit links from scraped HTML\nconst extractRedditLinks = (html) => {\n  if (!html || typeof html !== 'string') return [];\n  const redditMatches = html.match(/reddit\\.com[^\\s\"<>]+/gi) || [];\n  return [...new Set(redditMatches)].slice(0, 3);\n};\n\n// Process scraped data - only actual results\nconst prices = extractPrices(bookingData);\nconst ratings = extractRatings(tripadvisorData);\nconst redditLinks = extractRedditLinks(redditData);\n\nconsole.log('📊 Extracted data:', {\n  prices: prices,\n  ratings: ratings,\n  redditLinks: redditLinks\n});\n\n// Return only actual scraped data with no mock content\nconst result = {\n  sessionId: originalData.sessionId,\n  automationType: 'Web Scraping Hotel Research (FIXED)',\n  completedAt: new Date().toISOString(),\n  location: originalData.location,\n  hotels: originalData.hotels,\n  \n  // Only include data that was actually found\n  scrapedData: {\n    prices: prices,\n    priceCount: prices.length,\n    averagePrice: prices.length > 0 ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : null,\n    lowestPrice: prices.length > 0 ? Math.min(...prices) : null,\n    highestPrice: prices.length > 0 ? Math.max(...prices) : null,\n    \n    ratings: ratings,\n    ratingCount: ratings.length,\n    \n    redditLinks: redditLinks,\n    redditLinkCount: redditLinks.length\n  },\n  \n  // Only return success status if data was actually found\n  success: prices.length > 0 || ratings.length > 0 || redditLinks.length > 0,\n  dataFound: {\n    hasPrices: prices.length > 0,\n    hasRatings: ratings.length > 0,\n    hasRedditDiscussion: redditLinks.length > 0\n  },\n  \n  // Debug info\n  debug: {\n    rawDataLengths: {\n      booking: bookingData.length,\n      tripadvisor: tripadvisorData.length,\n      reddit: redditData.length\n    }\n  }\n};\n\n// Log results\nif (result.success) {\n  console.log('✅ Hotel data successfully scraped:', {\n    prices: prices.length,\n    ratings: ratings.length,\n    redditLinks: redditLinks.length\n  });\n} else {\n  console.log('⚠️ No hotel data found in scraped results');\n}\n\nreturn result;"
+      },
+      "id": "parse-results",
+      "name": "Parse Scraped Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Hotel Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Search Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Booking.com via Google",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search TripAdvisor Reviews",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Reddit Reviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Booking.com via Google": {
+      "main": [
+        [
+          {
+            "node": "Parse Scraped Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search TripAdvisor Reviews": {
+      "main": [
+        [
+          {
+            "node": "Parse Scraped Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Reddit Reviews": {
+      "main": [
+        [
+          {
+            "node": "Parse Scraped Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+} 

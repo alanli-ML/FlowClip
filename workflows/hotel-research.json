@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "instanceId": "flowclip-local"
+  },
+  "name": "FlowClip Hotel Research",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "flowclip-hotel-research",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "webhook-hotel",
+      "name": "Hotel Research Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "flowclip-hotel-research"
+    },
+    {
+      "parameters": {
+        "functionCode": "// FlowClip Hotel Research Processing - NO MOCK DATA\nconst data = $json;\n\nconsole.log('🏨 FlowClip Hotel Research Triggered!', data);\n\n// Extract actual hotel information from session\nconst hotels = data.hotelData?.hotelNames || [];\nconst location = data.hotelData?.locations?.[0] || '';\nconst itemCount = data.itemCount || 0;\nconst dates = data.hotelData?.checkInDates || [];\n\n// Return only actual session data with no mock content\nconst result = {\n  sessionId: data.sessionId,\n  sessionType: data.sessionType,\n  itemCount: itemCount,\n  \n  hotelData: {\n    hotels: hotels,\n    location: location,\n    checkInDates: dates,\n    hotelCount: hotels.length\n  },\n  \n  researchComplete: true,\n  completedAt: new Date().toISOString(),\n  \n  // Only include insights if actual data was found\n  insights: hotels.length > 0 ? [`Found ${hotels.length} hotels in ${location}`] : ['No hotel data found in session'],\n  \n  automation: {\n    type: 'Hotel Research Automation',\n    triggeredBy: 'FlowClip Session Threshold',\n    itemThreshold: 2,\n    actualItems: itemCount,\n    hasData: hotels.length > 0 || location.length > 0\n  }\n};\n\nconsole.log('🎯 Hotel research automation completed with actual data only:', result);\n\nreturn result;"
+      },
+      "id": "process-hotel",
+      "name": "Process Hotel Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Hotel Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Process Hotel Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "2"
+} 

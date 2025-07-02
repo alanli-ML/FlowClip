@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowClip Smart Actions</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            color: white;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .overlay-container {
+            padding: 16px;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .overlay-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .overlay-icon {
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+
+        .overlay-title {
+            font-size: 13px;
+            font-weight: 600;
+            flex: 1;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .close-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .content-preview {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 12px;
+            max-height: 40px;
+            overflow: hidden;
+            line-height: 1.3;
+        }
+
+        .smart-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+        }
+
+        .action-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .action-btn.priority-high {
+            background: rgba(34, 197, 94, 0.2);
+            border-color: rgba(34, 197, 94, 0.4);
+        }
+
+        .action-btn.priority-high:hover {
+            background: rgba(34, 197, 94, 0.3);
+        }
+
+        .action-btn.priority-medium {
+            background: rgba(251, 191, 36, 0.2);
+            border-color: rgba(251, 191, 36, 0.4);
+        }
+
+        .action-btn.priority-medium:hover {
+            background: rgba(251, 191, 36, 0.3);
+        }
+
+        .action-icon {
+            width: 16px;
+            text-align: center;
+            font-size: 11px;
+        }
+
+        .action-text {
+            flex: 1;
+        }
+
+        .action-reason {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 2px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+        }
+
+        .loading i {
+            margin-right: 8px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="overlay-container fade-in">
+        <div class="overlay-header">
+            <div class="overlay-icon">
+                <i class="fas fa-magic"></i>
+            </div>
+            <div class="overlay-title">Smart Actions</div>
+            <button class="close-btn" onclick="closeOverlay()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="content-preview" id="contentPreview">
+            <!-- Content preview will be inserted here -->
+        </div>
+        
+        <div class="smart-actions" id="smartActions">
+            <div class="loading">
+                <i class="fas fa-spinner"></i>
+                Loading smart actions...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        let currentContext = null;
+
+        // Listen for smart actions data
+        ipcRenderer.on('show-smart-actions', (event, data) => {
+            currentContext = data;
+            showSmartActions(data);
+        });
+
+        function showSmartActions(data) {
+            const { clipboardItem, actions } = data;
+            
+            // Update content preview
+            const contentPreview = document.getElementById('contentPreview');
+            const truncatedContent = clipboardItem.content.length > 100 
+                ? clipboardItem.content.substring(0, 100) + '...'
+                : clipboardItem.content;
+            contentPreview.textContent = truncatedContent;
+
+            // Update smart actions
+            const smartActionsContainer = document.getElementById('smartActions');
+            
+            if (actions && actions.length > 0) {
+                smartActionsContainer.innerHTML = actions.map(actionItem => {
+                    const priorityClass = actionItem.priority === 'high' ? 'priority-high' : 
+                                        actionItem.priority === 'medium' ? 'priority-medium' : '';
+                    
+                    const actionConfig = getActionConfig(actionItem.action);
+                    
+                    return `
+                        <div class="action-btn ${priorityClass}" onclick="executeAction('${actionItem.action}')">
+                            <i class="fas fa-${actionConfig.icon} action-icon"></i>
+                            <div class="action-text">
+                                <div>${actionConfig.label}</div>
+                                <div class="action-reason">${actionItem.reason || actionConfig.description}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                smartActionsContainer.innerHTML = '<div class="loading">No smart actions available</div>';
+            }
+        }
+
+        function getActionConfig(action) {
+            const configs = {
+                'research': { label: 'Research', icon: 'search', description: 'Research this topic' },
+                'fact_check': { label: 'Fact Check', icon: 'check-circle', description: 'Verify facts and claims' },
+                'summarize': { label: 'Summarize', icon: 'compress-alt', description: 'Create a summary' },
+                'translate': { label: 'Translate', icon: 'language', description: 'Translate to another language' },
+                'explain': { label: 'Explain', icon: 'lightbulb', description: 'Explain the content' },
+                'expand': { label: 'Expand', icon: 'expand-alt', description: 'Get more details' },
+                'create_task': { label: 'Create Task', icon: 'tasks', description: 'Create a task from this' },
+                'save_reference': { label: 'Save', icon: 'bookmark', description: 'Save for reference' },
+                'share': { label: 'Share', icon: 'share', description: 'Share this content' },
+                'cite': { label: 'Cite', icon: 'quote-left', description: 'Create citation' },
+                'respond': { label: 'Reply', icon: 'reply', description: 'Draft a response' },
+                'schedule': { label: 'Schedule', icon: 'calendar', description: 'Schedule related activity' }
+            };
+            return configs[action] || { label: action, icon: 'cog', description: `Perform ${action}` };
+        }
+
+        function executeAction(action) {
+            if (!currentContext) return;
+            
+            // Show loading state
+            const actionBtn = event.target.closest('.action-btn');
+            if (actionBtn) {
+                actionBtn.innerHTML = '<i class="fas fa-spinner action-icon"></i><div class="action-text">Processing...</div>';
+                actionBtn.style.pointerEvents = 'none';
+            }
+
+            // Send action to main process
+            ipcRenderer.send('execute-paste-action', action);
+        }
+
+        function closeOverlay() {
+            ipcRenderer.send('close-overlay');
+        }
+
+        // Auto-hide on escape key
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeOverlay();
+            }
+        });
+
+        // Handle clicks outside to close
+        document.addEventListener('click', (event) => {
+            if (event.target === document.body) {
+                closeOverlay();
+            }
+        });
+    </script>
+</body>
+</html> 

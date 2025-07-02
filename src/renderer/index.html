@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowClip - AI-Powered Clipboard Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <i class="fas fa-clipboard-list"></i>
+                    <span>FlowClip</span>
+                </div>
+                <div class="status-indicator">
+                    <span id="monitoring-status" class="status active">
+                        <i class="fas fa-circle"></i>
+                        Monitoring
+                    </span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-icon" id="settings-btn" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
+                <button class="btn btn-icon" id="minimize-btn" title="Minimize">
+                    <i class="fas fa-minus"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <nav class="nav">
+                    <a href="#" class="nav-item active" data-view="history">
+                        <i class="fas fa-history"></i>
+                        <span>History</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="search">
+                        <i class="fas fa-search"></i>
+                        <span>Search</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="sessions">
+                        <i class="fas fa-layer-group"></i>
+                        <span>Sessions</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="tags">
+                        <i class="fas fa-tags"></i>
+                        <span>Tags</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="stats">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Stats</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="settings">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </a>
+                </nav>
+
+                <!-- Quick Actions -->
+                <div class="quick-actions">
+                    <h3>Quick Actions</h3>
+                    <button class="btn btn-action" id="clear-all-btn">
+                        <i class="fas fa-trash"></i>
+                        Clear All
+                    </button>
+                    <button class="btn btn-action" id="export-btn">
+                        <i class="fas fa-download"></i>
+                        Export
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Search Bar -->
+                <div class="search-container">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="search-input" placeholder="Search clipboard history...">
+                        <button class="btn btn-icon" id="clear-search">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="search-filters">
+                        <select id="content-type-filter">
+                            <option value="">All Types</option>
+                            <option value="TEXT">Text</option>
+                            <option value="IMAGE">Image</option>
+                            <option value="FILE">File</option>
+                        </select>
+                        <select id="source-app-filter">
+                            <option value="">All Apps</option>
+                        </select>
+                        <input type="date" id="date-filter">
+                    </div>
+                </div>
+
+                <!-- Views Container -->
+                <div class="views-container">
+                    <!-- History View -->
+                    <div id="history-view" class="view active">
+                        <div class="view-header">
+                            <h2>Clipboard History</h2>
+                            <div class="view-controls">
+                                <button class="btn btn-sm" id="refresh-btn">
+                                    <i class="fas fa-sync-alt"></i>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                        <div id="clipboard-items" class="clipboard-items">
+                            <!-- Clipboard items will be inserted here -->
+                        </div>
+                        <div id="loading" class="loading hidden">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- Search View -->
+                    <div id="search-view" class="view">
+                        <div class="view-header">
+                            <h2>Search Results</h2>
+                        </div>
+                        <div id="search-results" class="clipboard-items">
+                            <!-- Search results will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Sessions View -->
+                    <div id="sessions-view" class="view">
+                        <div class="view-header">
+                            <h2>Clipboard Sessions</h2>
+                            <div class="view-controls">
+                                <button class="btn btn-sm" id="refresh-sessions-btn">
+                                    <i class="fas fa-sync-alt"></i>
+                                    Refresh
+                                </button>
+                                <button class="btn btn-sm btn-danger" id="clear-sessions-btn" title="Clear all sessions">
+                                    <i class="fas fa-trash-alt"></i>
+                                    Clear Sessions
+                                </button>
+                            </div>
+                        </div>
+                        <div class="sessions-container">
+                            <div class="sessions-filter">
+                                <select id="session-type-filter">
+                                    <option value="">All Session Types</option>
+                                    <option value="hotel_research">Hotel Research</option>
+                                    <option value="restaurant_research">Restaurant Research</option>
+                                    <option value="product_research">Product Research</option>
+                                    <option value="academic_research">Academic Research</option>
+                                    <option value="travel_research">Travel Research</option>
+                                    <option value="general_research">General Research</option>
+                                </select>
+                                <select id="session-status-filter">
+                                    <option value="">All Statuses</option>
+                                    <option value="active">Active</option>
+                                    <option value="expired">Expired</option>
+                                    <option value="completed">Completed</option>
+                                </select>
+                            </div>
+                            <div id="sessions-list" class="sessions-list">
+                                <!-- Sessions will be inserted here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tags View -->
+                    <div id="tags-view" class="view">
+                        <div class="view-header">
+                            <h2>Tags</h2>
+                        </div>
+                        <div id="tags-container" class="tags-container">
+                            <!-- Tags will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Stats View -->
+                    <div id="stats-view" class="view">
+                        <div class="view-header">
+                            <h2>Statistics</h2>
+                        </div>
+                        <div id="stats-container" class="stats-container">
+                            <!-- Stats will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Settings View -->
+                    <div id="settings-view" class="view">
+                        <div class="view-header">
+                            <h2>Settings</h2>
+                        </div>
+                        <div class="settings-container">
+                            <div class="settings-section">
+                                <h3>AI Configuration</h3>
+                                <div class="form-group">
+                                    <label for="openai-api-key">OpenAI API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" id="openai-api-key" placeholder="sk-...">
+                                        <button class="btn btn-sm" id="test-api-key">Test</button>
+                                    </div>
+                                    <small>Your API key is stored locally and never sent to our servers.</small>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
+                                <h3>Privacy & Storage</h3>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="capture-screenshots">
+                                        <span class="checkmark"></span>
+                                        Capture screenshots with clipboard items
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="capture-context">
+                                        <span class="checkmark"></span>
+                                        Capture surrounding text context
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label for="retention-days">Keep clipboard history for:</label>
+                                    <select id="retention-days">
+                                        <option value="7">1 week</option>
+                                        <option value="30">1 month</option>
+                                        <option value="90">3 months</option>
+                                        <option value="365">1 year</option>
+                                        <option value="-1">Forever</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
+                                <h3>Application</h3>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="start-minimized">
+                                        <span class="checkmark"></span>
+                                        Start minimized to tray
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="launch-at-startup">
+                                        <span class="checkmark"></span>
+                                        Launch at system startup
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-actions">
+                                <button class="btn btn-primary" id="save-settings">Save Settings</button>
+                                <button class="btn btn-secondary" id="reset-settings">Reset to Defaults</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- Clipboard Item Detail Modal -->
+    <div id="item-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Clipboard Item</h3>
+                <button class="btn btn-icon modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="item-content">
+                    <div class="item-text" id="modal-content"></div>
+                    <div class="item-screenshot" id="modal-screenshot"></div>
+                </div>
+                <div class="item-metadata">
+                    <div class="metadata-row">
+                        <span class="label">Source:</span>
+                        <span id="modal-source"></span>
+                    </div>
+                    <div class="metadata-row">
+                        <span class="label">Time:</span>
+                        <span id="modal-time"></span>
+                    </div>
+                    <div class="metadata-row">
+                        <span class="label">Tags:</span>
+                        <div id="modal-tags" class="tags"></div>
+                    </div>
+                </div>
+                <div class="ai-actions">
+                    <h4>AI Actions</h4>
+                    <div class="action-buttons">
+                        <button class="btn btn-ai" data-action="summarize">
+                            <i class="fas fa-compress-alt"></i>
+                            Summarize
+                        </button>
+                        <button class="btn btn-ai" data-action="research">
+                            <i class="fas fa-search"></i>
+                            Research
+                        </button>
+                        <button class="btn btn-ai" data-action="fact_check">
+                            <i class="fas fa-check-circle"></i>
+                            Fact Check
+                        </button>
+                        <button class="btn btn-ai" data-action="create_task">
+                            <i class="fas fa-tasks"></i>
+                            Create Task
+                        </button>
+                        <button class="btn btn-ai" data-action="translate">
+                            <i class="fas fa-language"></i>
+                            Translate
+                        </button>
+                        <button class="btn btn-ai" data-action="explain">
+                            <i class="fas fa-lightbulb"></i>
+                            Explain
+                        </button>
+                    </div>
+                </div>
+                <div id="ai-result" class="ai-result hidden">
+                    <h4>AI Result</h4>
+                    <div id="ai-result-content"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="copy-item">
+                    <i class="fas fa-copy"></i>
+                    Copy to Clipboard
+                </button>
+                <button class="btn btn-secondary" id="delete-item">
+                    <i class="fas fa-trash"></i>
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Detail Modal -->
+    <div id="session-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="session-modal-title">Session Details</h3>
+                <button class="btn btn-icon modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="session-overview">
+                    <div class="session-meta">
+                        <div class="session-info">
+                            <div class="info-row">
+                                <span class="label">Session Type:</span>
+                                <span id="session-type" class="session-type-badge"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="label">Status:</span>
+                                <span id="session-status" class="status-badge"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="label">Duration:</span>
+                                <span id="session-duration"></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="label">Items:</span>
+                                <span id="session-item-count"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="session-analysis">
+                    <div class="analysis-section">
+                        <h4><i class="fas fa-brain"></i> Intent Recognition</h4>
+                        <div id="session-intent-analysis" class="analysis-content">
+                            <!-- Intent analysis will be displayed here -->
+                        </div>
+                    </div>
+
+                    <div class="analysis-section">
+                        <h4><i class="fas fa-chart-line"></i> Research Flow</h4>
+                        <div id="session-research-flow" class="research-flow">
+                            <!-- Research flow timeline will be displayed here -->
+                        </div>
+                    </div>
+
+                    <div class="analysis-section" id="hotel-research-section" style="display: none;">
+                        <h4><i class="fas fa-hotel"></i> Hotel Research Analysis</h4>
+                        <div id="hotel-research-data" class="hotel-research-content">
+                            <!-- Hotel research specific data will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="session-items">
+                    <h4><i class="fas fa-clipboard-list"></i> Session Items</h4>
+                    <div id="session-items-list" class="session-items-container">
+                        <!-- Session items will be displayed here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="export-session">
+                    <i class="fas fa-download"></i>
+                    Export Session
+                </button>
+                <button class="btn btn-secondary" id="close-session">
+                    <i class="fas fa-times-circle"></i>
+                    Close Session
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast">
+        <div class="toast-content">
+            <i class="toast-icon"></i>
+            <span class="toast-message"></span>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html> 

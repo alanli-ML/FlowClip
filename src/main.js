@@ -1,0 +1,882 @@
+const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage } = require('electron');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const screenshot = require('screenshot-desktop');
+const Database = require('./database/database');
+const AIService = require('./services/aiService');
+const ContextCapture = require('./services/contextCapture');
+const PermissionManager = require('./services/permissionManager');
+const WorkflowEngine = require('./services/workflowEngine');
+const PasteAssistant = require('./services/pasteAssistant');
+const SessionManager = require('./services/sessionManager');
+const ExternalApiService = require('./services/externalApiService');
+const Store = require('electron-store');
+
+// Initialize store for app settings
+const store = new Store();
+
+class FlowClipApp {
+  constructor() {
+    this.mainWindow = null;
+    this.tray = null;
+    this.database = new Database();
+    this.aiService = new AIService();
+    this.contextCapture = new ContextCapture();
+    this.permissionManager = new PermissionManager();
+    this.workflowEngine = new WorkflowEngine(this.database, this.aiService);
+    this.pasteAssistant = new PasteAssistant(this.database, this.aiService);
+    this.externalApiService = new ExternalApiService();
+    this.sessionManager = new SessionManager(this.database, this.aiService, this.externalApiService);
+    this.isMonitoring = false;
+    this.lastClipboardContent = '';
+    this.clipboardCheckInterval = null;
+    this.isFirstRun = store.get('isFirstRun', true);
+  }
+
+  async init() {
+    await this.database.init();
+    await this.permissionManager.init();
+    await this.workflowEngine.init();
+    await this.sessionManager.init();
+    this.setupApp();
+    this.setupIPC();
+    this.setupWorkflowEvents();
+    this.setupSessionEvents();
+    
+    // Set up permission change listener
+    this.permissionManager.onPermissionsChanged = (permissions) => {
+      this.handlePermissionsChanged(permissions);
+    };
+  }
+
+  setupWorkflowEvents() {
+    // Listen to workflow events
+    this.workflowEngine.on('workflow-started', (event) => {
+      console.log('Workflow started:', event.workflowId);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('workflow-started', event);
+      }
+    });
+
+    this.workflowEngine.on('workflow-completed', (event) => {
+      console.log('Workflow completed:', event.executionId);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('workflow-completed', event);
+      }
+    });
+
+    this.workflowEngine.on('workflow-failed', (event) => {
+      console.error('Workflow failed:', event.executionId, event.error);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('workflow-failed', event);
+      }
+    });
+
+    this.workflowEngine.on('workflow-step-completed', (event) => {
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('workflow-step-completed', event);
+      }
+    });
+  }
+
+  setupSessionEvents() {
+    // Listen to session events
+    this.sessionManager.on('session-created', (event) => {
+      console.log('Session created:', event.session.session_type, event.session.session_label);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-created', event);
+      }
+    });
+
+    this.sessionManager.on('session-updated', (event) => {
+      console.log('Session updated:', event.sessionType, 'items:', event.itemCount);
+      
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-updated', event);
+      }
+    });
+
+    this.sessionManager.on('sessions-expired', (event) => {
+      console.log('Sessions expired:', event.count);
+    });
+
+    // Listen to external automation events
+    this.sessionManager.on('automation-triggered', (event) => {
+      console.log('External automation triggered:', event.sessionType, 'workflow:', event.workflowId);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('automation-triggered', event);
+      }
+    });
+
+    this.sessionManager.on('automation-failed', (event) => {
+      console.error('External automation failed:', event.sessionType, event.error);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('automation-failed', event);
+      }
+    });
+
+    // Listen to external API service events
+    this.externalApiService.on('workflow-triggered', (event) => {
+      console.log('N8N workflow triggered:', event.workflowId, 'for session:', event.sessionType);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('n8n-workflow-triggered', event);
+      }
+    });
+
+    this.externalApiService.on('workflow-error', (event) => {
+      console.error('N8N workflow error:', event.sessionType, event.error);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('n8n-workflow-error', event);
+      }
+    });
+  }
+
+
+
+  setupApp() {
+    // Handle app ready
+    app.whenReady().then(async () => {
+      this.createMainWindow();
+      this.createTray();
+      
+      // Show onboarding for first-time users
+      if (this.isFirstRun) {
+        await this.showOnboarding();
+        store.set('isFirstRun', false);
+      } else {
+        // For returning users, check permissions silently
+        await this.checkPermissionsAndStart();
+      }
+      
+      this.registerGlobalShortcuts();
+    });
+
+    // Handle window closed on macOS
+    app.on('window-all-closed', () => {
+      if (process.platform !== 'darwin') {
+        app.quit();
+      }
+    });
+
+    // Handle app activation on macOS
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        this.createMainWindow();
+      }
+    });
+
+    // Cleanup before quit
+    app.on('before-quit', () => {
+      this.stopClipboardMonitoring();
+      this.pasteAssistant.destroy();
+      this.sessionManager.destroy();
+      globalShortcut.unregisterAll();
+      this.permissionManager.destroy();
+    });
+  }
+
+  async showOnboarding() {
+    // Show welcome and permission setup
+    const hasPermissions = await this.permissionManager.showOnboardingFlow();
+    
+    if (hasPermissions) {
+      this.startClipboardMonitoring();
+    } else {
+      // Start with limited functionality
+      this.startClipboardMonitoring();
+      this.showPermissionReminder();
+    }
+  }
+
+  async checkPermissionsAndStart() {
+    const permissions = await this.permissionManager.checkAllPermissions();
+    
+    // Always start clipboard monitoring (works without permissions)
+    this.startClipboardMonitoring();
+    
+    // Initialize paste assistant for smart actions
+    await this.pasteAssistant.init();
+    
+    // Update context capture capabilities
+    this.contextCapture.setPermissions(permissions);
+    
+    // Enable debug mode for better screenshot debugging
+    this.contextCapture.setDebugMode(true);
+    
+    // Update UI with permission status
+    if (this.mainWindow) {
+      this.mainWindow.webContents.send('permissions-updated', permissions);
+    }
+  }
+
+  handlePermissionsChanged(permissions) {
+    console.log('Permissions changed:', permissions);
+    
+    // Update context capture capabilities
+    this.contextCapture.setPermissions(permissions);
+    
+    // Notify UI
+    if (this.mainWindow) {
+      this.mainWindow.webContents.send('permissions-updated', permissions);
+    }
+    
+    // Update tray tooltip with permission status
+    this.updateTrayTooltip(permissions);
+  }
+
+  updateTrayTooltip(permissions) {
+    const features = this.permissionManager.getAvailableFeatures();
+    const activeFeatures = Object.entries(features)
+      .filter(([key, value]) => value)
+      .map(([key]) => key);
+    
+    this.tray.setToolTip(`FlowClip - ${activeFeatures.length} features active`);
+  }
+
+  showPermissionReminder() {
+    // Show a non-intrusive reminder about missing permissions
+    setTimeout(() => {
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('show-permission-reminder');
+      }
+    }, 5000); // Show after 5 seconds
+  }
+
+  createMainWindow() {
+    this.mainWindow = new BrowserWindow({
+      width: 800,
+      height: 600,
+      minWidth: 600,
+      minHeight: 400,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        enableRemoteModule: true
+      },
+      titleBarStyle: 'hiddenInset',
+      show: false,
+      skipTaskbar: false
+    });
+
+    // Load the main UI
+    this.mainWindow.loadFile('src/renderer/index.html');
+
+    // Show window when ready
+    this.mainWindow.once('ready-to-show', () => {
+      console.log('Window ready to show, startMinimized:', store.get('startMinimized', false));
+      // Force show window for debugging
+      this.mainWindow.show();
+      this.mainWindow.focus();
+      console.log('Window should now be visible');
+    });
+
+    // Handle window close (minimize to tray instead)
+    this.mainWindow.on('close', (event) => {
+      if (!app.isQuiting) {
+        event.preventDefault();
+        this.mainWindow.hide();
+      }
+    });
+  }
+
+  createTray() {
+    // Create tray icon
+    const trayIcon = nativeImage.createFromPath(path.join(__dirname, '../assets/tray-icon.png'));
+    this.tray = new Tray(trayIcon.resize({ width: 16, height: 16 }));
+
+    this.updateTrayMenu();
+    this.updateTrayTooltip(this.permissionManager.getPermissionStatus());
+
+    // Handle double click to show main window
+    this.tray.on('double-click', () => {
+      this.mainWindow.show();
+      this.mainWindow.focus();
+    });
+  }
+
+  updateTrayMenu() {
+    const permissions = this.permissionManager.getPermissionStatus();
+    const workflowStats = this.workflowEngine.getStats();
+    
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show FlowClip',
+        click: () => {
+          this.mainWindow.show();
+          this.mainWindow.focus();
+        }
+      },
+      {
+        label: 'Clipboard History',
+        accelerator: 'CmdOrCtrl+Shift+V',
+        click: () => {
+          this.showClipboardHistory();
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Monitoring',
+        type: 'checkbox',
+        checked: this.isMonitoring,
+        click: () => {
+          this.toggleClipboardMonitoring();
+        }
+      },
+      {
+        label: 'Workflows',
+        submenu: [
+          {
+            label: `Active: ${workflowStats.runningExecutions}`,
+            enabled: false
+          },
+          {
+            label: `Total: ${workflowStats.totalWorkflows}`,
+            enabled: false
+          },
+          { type: 'separator' },
+          {
+            label: 'View Workflows',
+            click: () => {
+              this.showWorkflows();
+            }
+          }
+        ]
+      },
+      {
+        label: 'Permissions',
+        submenu: [
+          {
+            label: `Accessibility ${permissions.accessibility ? '✓' : '✗'}`,
+            enabled: !permissions.accessibility,
+            click: () => {
+              this.permissionManager.requestAccessibilityPermission();
+            }
+          },
+          {
+            label: `Screen Recording ${permissions.screenRecording ? '✓' : '✗'}`,
+            enabled: !permissions.screenRecording,
+            click: () => {
+              this.permissionManager.requestScreenRecordingPermission();
+            }
+          },
+          {
+            label: `Automation ${permissions.automation ? '✓' : '✗'}`,
+            enabled: !permissions.automation,
+            click: () => {
+              this.permissionManager.requestAutomationPermission();
+            }
+          },
+          { type: 'separator' },
+          {
+            label: 'Permission Guide',
+            click: () => {
+              this.permissionManager.showPermissionGuide();
+            }
+          }
+        ]
+      },
+      { type: 'separator' },
+      {
+        label: 'Preferences',
+        click: () => {
+          this.openPreferences();
+        }
+      },
+      {
+        label: 'Quit FlowClip',
+        click: () => {
+          app.isQuiting = true;
+          app.quit();
+        }
+      }
+    ]);
+
+    this.tray.setContextMenu(contextMenu);
+  }
+
+  registerGlobalShortcuts() {
+    // Register global shortcut for quick access
+    globalShortcut.register('CmdOrCtrl+Shift+V', () => {
+      this.showClipboardHistory();
+    });
+
+    // Register shortcut to toggle monitoring
+    globalShortcut.register('CmdOrCtrl+Shift+M', () => {
+      this.toggleClipboardMonitoring();
+    });
+
+    // Register shortcut to test overlay (for debugging)
+    globalShortcut.register('CmdOrCtrl+Shift+T', async () => {
+      console.log('Testing overlay via keyboard shortcut...');
+      await this.pasteAssistant.testOverlay();
+    });
+  }
+
+  startClipboardMonitoring() {
+    if (this.isMonitoring) return;
+
+    this.isMonitoring = true;
+    this.lastClipboardContent = clipboard.readText();
+
+    // Check clipboard every 500ms
+    this.clipboardCheckInterval = setInterval(() => {
+      this.checkClipboard();
+    }, 500);
+
+    console.log('Clipboard monitoring started');
+    this.updateTrayMenu(); // Update tray menu to reflect monitoring status
+  }
+
+  stopClipboardMonitoring() {
+    if (!this.isMonitoring) return;
+
+    this.isMonitoring = false;
+    if (this.clipboardCheckInterval) {
+      clearInterval(this.clipboardCheckInterval);
+      this.clipboardCheckInterval = null;
+    }
+
+    console.log('Clipboard monitoring stopped');
+    this.updateTrayMenu(); // Update tray menu to reflect monitoring status
+  }
+
+  toggleClipboardMonitoring() {
+    if (this.isMonitoring) {
+      this.stopClipboardMonitoring();
+    } else {
+      this.startClipboardMonitoring();
+    }
+  }
+
+  async checkClipboard() {
+    const currentContent = clipboard.readText();
+    
+    if (currentContent && currentContent !== this.lastClipboardContent) {
+      this.lastClipboardContent = currentContent;
+      await this.handleClipboardChange(currentContent);
+    }
+  }
+
+  async handleClipboardChange(content) {
+    try {
+      console.log('Clipboard changed:', content.substring(0, 100) + '...');
+
+      // Check if this content was previously copied by FlowClip (for paste detection)
+      const existingItem = await this.findExistingClipboardItem(content);
+
+      // Capture context (will adapt based on available permissions)
+      const context = await this.contextCapture.captureContext();
+      
+      // Create clipboard item
+      const clipboardItem = {
+        id: uuidv4(),
+        content: content,
+        content_type: 'TEXT',
+        timestamp: new Date().toISOString(),
+        source_app: context.activeApp,
+        window_title: context.windowTitle,
+        screenshot_path: context.screenshotPath,
+        surrounding_text: context.surroundingText,
+        capture_method: context.captureMethod,
+        tags: []
+      };
+
+      // Save to database only if it's new content
+      if (!existingItem) {
+        await this.database.saveClipboardItem(clipboardItem);
+
+        // Notify renderer to update UI with new clipboard item
+        if (this.mainWindow) {
+          this.mainWindow.webContents.send('clipboard-item-added', clipboardItem);
+        }
+
+        // Process session membership for new content
+        await this.sessionManager.processClipboardItem(clipboardItem);
+
+        // Trigger workflows for new clipboard content
+        await this.workflowEngine.triggerWorkflows('clipboard-change', {
+          clipboardItem: clipboardItem,
+          context: context
+        });
+
+        // Legacy AI analysis (kept for backwards compatibility)
+        // The workflow engine now handles this more systematically
+        this.aiService.analyzeClipboardItem(clipboardItem);
+      }
+
+      // Notify PasteAssistant of clipboard change (for both new and existing content)
+      await this.pasteAssistant.onClipboardChange(content, existingItem || clipboardItem);
+
+      // Update tray menu periodically
+      this.updateTrayMenu();
+
+    } catch (error) {
+      console.error('Error handling clipboard change:', error);
+    }
+  }
+
+  async findExistingClipboardItem(content) {
+    try {
+      const items = await this.database.getClipboardHistory({ limit: 50 });
+      
+      // First try exact match
+      let match = items.find(item => item.content === content);
+      
+      if (!match) {
+        // Try normalized match (trim whitespace and normalize newlines)
+        const normalizedContent = content.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        match = items.find(item => {
+          const itemContent = item.content.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          return itemContent === normalizedContent;
+        });
+      }
+      
+      return match || null;
+    } catch (error) {
+      console.error('Error finding existing clipboard item:', error);
+      return null;
+    }
+  }
+
+  showClipboardHistory() {
+    if (!this.mainWindow) {
+      this.createMainWindow();
+    }
+    
+    this.mainWindow.show();
+    this.mainWindow.focus();
+    this.mainWindow.webContents.send('show-clipboard-history');
+  }
+
+  showWorkflows() {
+    if (!this.mainWindow) {
+      this.createMainWindow();
+    }
+    
+    this.mainWindow.show();
+    this.mainWindow.focus();
+    this.mainWindow.webContents.send('show-workflows');
+  }
+
+  openPreferences() {
+    if (!this.mainWindow) {
+      this.createMainWindow();
+    }
+    
+    this.mainWindow.show();
+    this.mainWindow.focus();
+    this.mainWindow.webContents.send('show-preferences');
+  }
+
+  determineContentType(content) {
+    if (!content) return 'text';
+    
+    // URL detection
+    if (content.match(/^https?:\/\//)) return 'url';
+    
+    // Email detection
+    if (content.match(/\S+@\S+\.\S+/)) return 'email';
+    
+    // Code detection (simple heuristics)
+    if (content.includes('function') || content.includes('class') || content.includes('import')) return 'code';
+    
+    // JSON detection
+    if (content.trim().startsWith('{') && content.trim().endsWith('}')) return 'data';
+    
+    // Phone detection
+    if (content.match(/^\+?[\d\s\-\(\)]+$/) && content.replace(/\D/g, '').length >= 10) return 'phone';
+    
+    // Default
+    return 'text';
+  }
+
+  getFallbackActions(contentType) {
+    const fallbackActions = {
+      'url': [
+        { action: 'research', priority: 'high', reason: 'Explore this link for more information', confidence: 0.8 },
+        { action: 'save_reference', priority: 'medium', reason: 'Save for future reference', confidence: 0.7 }
+      ],
+      'email': [
+        { action: 'respond', priority: 'high', reason: 'Draft a response to this email', confidence: 0.8 },
+        { action: 'schedule', priority: 'medium', reason: 'Schedule follow-up or meeting', confidence: 0.6 }
+      ],
+      'code': [
+        { action: 'explain', priority: 'high', reason: 'Explain how this code works', confidence: 0.8 },
+        { action: 'save_reference', priority: 'medium', reason: 'Save code snippet for reference', confidence: 0.7 }
+      ],
+      'phone': [
+        { action: 'save_reference', priority: 'high', reason: 'Save contact information', confidence: 0.8 },
+        { action: 'schedule', priority: 'medium', reason: 'Schedule a call', confidence: 0.6 }
+      ],
+      'data': [
+        { action: 'explain', priority: 'high', reason: 'Explain the data structure', confidence: 0.7 },
+        { action: 'save_reference', priority: 'medium', reason: 'Save data for analysis', confidence: 0.6 }
+      ],
+      'text': [
+        { action: 'summarize', priority: 'medium', reason: 'Create a summary of this text', confidence: 0.6 },
+        { action: 'save_reference', priority: 'medium', reason: 'Save for future reference', confidence: 0.7 }
+      ]
+    };
+
+    return fallbackActions[contentType] || fallbackActions['text'];
+  }
+
+  setupIPC() {
+    // Get clipboard history
+    ipcMain.handle('get-clipboard-history', async (event, options = {}) => {
+      return await this.database.getClipboardHistory(options);
+    });
+
+    // Get single clipboard item
+    ipcMain.handle('get-clipboard-item', async (event, id) => {
+      return await this.database.getClipboardItem(id);
+    });
+
+    // Get recommended actions for clipboard item
+    ipcMain.handle('get-recommended-actions', async (event, clipboardItemId) => {
+      try {
+        // Get the clipboard item
+        const clipboardItem = await this.database.getClipboardItem(clipboardItemId);
+        if (!clipboardItem) {
+          return { error: 'Clipboard item not found' };
+        }
+
+        // Check if we already have action recommendations
+        const aiTasks = await this.database.getAITasksForClipboardItem(clipboardItemId);
+        const actionTask = aiTasks.find(task => task.task_type === 'langgraph_action_recommendation');
+        
+        if (actionTask && actionTask.status === 'completed' && actionTask.result) {
+          try {
+            const result = JSON.parse(actionTask.result);
+            return {
+              recommendedActions: result.recommendedActions || [],
+              confidence: result.confidence || 0.7,
+              cached: true
+            };
+          } catch (parseError) {
+            console.error('Error parsing action recommendation result:', parseError);
+          }
+        }
+
+        // If no cached recommendations, generate them using LangGraph
+        if (this.aiService.isConfigured() && this.aiService.langGraphClient) {
+          const workflowData = {
+            content: clipboardItem.content,
+            context: {
+              sourceApp: clipboardItem.source_app,
+              windowTitle: clipboardItem.window_title,
+              screenshotPath: clipboardItem.screenshot_path,
+              surroundingText: clipboardItem.surrounding_text,
+              timestamp: clipboardItem.timestamp
+            }
+          };
+
+          const result = await this.aiService.langGraphClient.executeWorkflow('action_recommendation', workflowData);
+          
+          // Save the result for future use
+          const { v4: uuidv4 } = require('uuid');
+          await this.database.saveAITask({
+            id: uuidv4(),
+            clipboard_item_id: clipboardItemId,
+            task_type: 'langgraph_action_recommendation',
+            status: 'completed',
+            result: JSON.stringify(result),
+            error: null
+          });
+
+          return {
+            recommendedActions: result.recommendedActions || [],
+            confidence: result.confidence || 0.7,
+            cached: false
+          };
+        }
+
+        // Fallback recommendations if AI is not configured
+        const contentType = this.determineContentType(clipboardItem.content);
+        return {
+          recommendedActions: this.getFallbackActions(contentType),
+          confidence: 0.5,
+          cached: false,
+          fallback: true
+        };
+
+      } catch (error) {
+        console.error('Error getting recommended actions:', error);
+        return { error: error.message };
+      }
+    });
+
+    // Search clipboard items
+    ipcMain.handle('search-clipboard', async (event, query) => {
+      return await this.database.searchClipboardItems(query);
+    });
+
+    // Trigger AI task (legacy)
+    ipcMain.handle('trigger-ai-task', async (event, clipboardItemId, taskType) => {
+      return await this.aiService.triggerTask(clipboardItemId, taskType);
+    });
+
+    // Get AI task result
+    ipcMain.handle('get-ai-task', async (event, taskId) => {
+      return await this.database.getAITask(taskId);
+    });
+
+    // Add tags to clipboard item
+    ipcMain.handle('add-tags', async (event, clipboardItemId, tags) => {
+      return await this.database.addTags(clipboardItemId, tags);
+    });
+
+    // Delete clipboard item
+    ipcMain.handle('delete-clipboard-item', async (event, id) => {
+      return await this.database.deleteClipboardItem(id);
+    });
+
+    // Clear all clipboard items
+    ipcMain.handle('clear-all-items', async () => {
+      return await this.database.clearAllItems();
+    });
+
+    // Copy content back to clipboard
+    ipcMain.handle('copy-to-clipboard', async (event, content) => {
+      clipboard.writeText(content);
+      return true;
+    });
+
+    // Get app settings
+    ipcMain.handle('get-settings', async () => {
+      return store.store;
+    });
+
+    // Update app settings
+    ipcMain.handle('update-settings', async (event, settings) => {
+      for (const [key, value] of Object.entries(settings)) {
+        store.set(key, value);
+      }
+      
+      // Reinitialize AIService if OpenAI API key was updated
+      if (settings.openaiApiKey) {
+        console.log('OpenAI API key updated, reinitializing AI services...');
+        this.aiService.setApiKey(settings.openaiApiKey);
+        console.log('AI services reinitialized successfully');
+      }
+      
+      return true;
+    });
+
+    // Get application statistics
+    ipcMain.handle('get-stats', async () => {
+      const dbStats = await this.database.getStats();
+      const workflowStats = this.workflowEngine.getStats();
+      const permissionStats = {
+        permissions: this.permissionManager.getPermissionStatus(),
+        features: this.permissionManager.getAvailableFeatures()
+      };
+      
+      return {
+        ...dbStats,
+        workflows: workflowStats,
+        permissions: permissionStats
+      };
+    });
+
+    // Session management IPC handlers
+    ipcMain.handle('get-active-sessions', async () => {
+      return await this.sessionManager.getActiveSessions();
+    });
+
+    ipcMain.handle('get-session', async (event, sessionId) => {
+      return await this.sessionManager.getSession(sessionId);
+    });
+
+    ipcMain.handle('get-session-items', async (event, sessionId) => {
+      return await this.sessionManager.getSessionItems(sessionId);
+    });
+
+    ipcMain.handle('get-sessions-by-type', async (event, sessionType) => {
+      return await this.sessionManager.getSessionsByType(sessionType);
+    });
+
+    // Clear all sessions
+    ipcMain.handle('clear-all-sessions', async () => {
+      return await this.sessionManager.clearAllSessions();
+    });
+
+    // Permission management IPC handlers
+    ipcMain.handle('get-permissions', async () => {
+      return this.permissionManager.getPermissionStatus();
+    });
+
+    ipcMain.handle('request-permission', async (event, permissionType) => {
+      switch (permissionType) {
+        case 'accessibility':
+          return await this.permissionManager.requestAccessibilityPermission();
+        case 'screenRecording':
+          return await this.permissionManager.requestScreenRecordingPermission();
+        case 'automation':
+          return await this.permissionManager.requestAutomationPermission();
+        default:
+          return false;
+      }
+    });
+
+    ipcMain.handle('show-permission-guide', async () => {
+      return await this.permissionManager.showPermissionGuide();
+    });
+
+    ipcMain.handle('get-available-features', async () => {
+      return this.permissionManager.getAvailableFeatures();
+    });
+
+    // Workflow management IPC handlers
+    ipcMain.handle('get-workflows', async () => {
+      return this.workflowEngine.getAllWorkflows();
+    });
+
+    ipcMain.handle('get-workflow', async (event, workflowId) => {
+      return this.workflowEngine.getWorkflow(workflowId);
+    });
+
+    ipcMain.handle('run-workflow', async (event, workflowId, data, options) => {
+      return await this.workflowEngine.runWorkflow(workflowId, data, options);
+    });
+
+    ipcMain.handle('get-workflow-executions', async () => {
+      return this.workflowEngine.getAllExecutions();
+    });
+
+    ipcMain.handle('get-workflow-execution', async (event, executionId) => {
+      return this.workflowEngine.getExecution(executionId);
+    });
+
+    ipcMain.handle('cancel-workflow-execution', async (event, executionId) => {
+      return this.workflowEngine.cancelExecution(executionId);
+    });
+
+    ipcMain.handle('get-workflow-stats', async () => {
+      return this.workflowEngine.getStats();
+    });
+
+    // Paste Assistant IPC handlers
+    ipcMain.on('execute-paste-action', async (event, action) => {
+      try {
+        await this.pasteAssistant.executeAction(action);
+      } catch (error) {
+        console.error('Error executing paste action:', error);
+      }
+    });
+
+    ipcMain.on('close-overlay', (event) => {
+      this.pasteAssistant.hideOverlay();
+    });
+
+    // Test overlay functionality
+    ipcMain.handle('test-overlay', async () => {
+      await this.pasteAssistant.testOverlay();
+      return true;
+    });
+  }
+}
+
+// Initialize and start the app
+const flowClip = new FlowClipApp();
+flowClip.init().catch(console.error); 
