@@ -99,7 +99,7 @@ Add these API keys to your N8N workflows:
 
 ```bash
 # Search & Discovery
-SERPAPI_KEY=your_key          # Google Search, Scholar
+OPENAI_API_KEY=your_key       # Web search and AI processing
 GOOGLE_API_KEY=your_key       # Custom Search
 
 # E-commerce  
@@ -112,7 +112,7 @@ BOOKING_API_KEY=your_key      # Hotel prices
 
 # Academic & Research
 # arXiv API is free (no key needed)
-# Google Scholar via SerpAPI
+# Academic search via OpenAI web search
 
 # Fact-checking
 SNOPES_API_KEY=your_key       # Fact verification

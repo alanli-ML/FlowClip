@@ -1,6 +1,7 @@
 const screenshot = require('screenshot-desktop');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { app } = require('electron');
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -213,54 +214,60 @@ class ContextCapture {
       
       const screenshotPath = path.join(screenshotDir, filename);
       
-      this.log('Starting automatic screenshot capture...');
+      this.log('🖼️ Starting intelligent screenshot capture (dialog-aware)...');
       
       // Try window-specific capture methods in order of preference
       if (process.platform === 'darwin') {
-        // Method 1: Try window bounds capture (most reliable)
+        // Method 1: Try enhanced window bounds capture (filters out dialogs)
         try {
-          this.log('Attempting window bounds capture...');
+          this.log('📐 Attempting enhanced window bounds capture (avoids dialogs)...');
           const windowCapture = await this.captureWindowBounds(screenshotPath);
           if (windowCapture) {
-            this.log(`Window bounds screenshot successful: ${screenshotPath}`);
+            this.log(`✅ Enhanced window bounds screenshot successful: ${screenshotPath}`);
             return screenshotPath;
+          } else {
+            this.log('⚠️ Enhanced window bounds capture found no suitable windows');
           }
         } catch (boundsError) {
-          this.log('Window bounds capture failed', boundsError.message);
+          this.log('❌ Enhanced window bounds capture failed', boundsError.message);
         }
         
-        // Method 2: Try simple frontmost window capture
+        // Method 2: Try smart frontmost window capture (also filters dialogs)
         try {
-          this.log('Attempting frontmost window capture...');
+          this.log('🎯 Attempting smart frontmost window capture...');
           const frontCapture = await this.captureFrontmostWindow(screenshotPath);
           if (frontCapture) {
-            this.log(`Frontmost window screenshot successful: ${screenshotPath}`);
+            this.log(`✅ Smart frontmost window screenshot successful: ${screenshotPath}`);
             return frontCapture;
+          } else {
+            this.log('⚠️ Smart frontmost capture found no suitable windows');
           }
         } catch (frontError) {
-          this.log('Frontmost window capture failed', frontError.message);
+          this.log('❌ Smart frontmost window capture failed', frontError.message);
         }
         
-        // Method 3: Try AppleScript-based window ID capture
+        // Method 3: Try AppleScript-based window ID capture (legacy method)
         try {
-          this.log('Attempting window ID capture...');
+          this.log('🔄 Attempting legacy window ID capture...');
           const windowIdCapture = await this.captureActiveWindowScreenshot(screenshotPath);
           if (windowIdCapture) {
-            this.log(`Window ID screenshot successful: ${screenshotPath}`);
+            this.log(`✅ Legacy window ID screenshot successful: ${screenshotPath}`);
             return screenshotPath;
+          } else {
+            this.log('⚠️ Legacy window ID capture failed');
           }
         } catch (idError) {
-          this.log('Window ID capture failed', idError.message);
+          this.log('❌ Legacy window ID capture failed', idError.message);
         }
       }
       
       // Fallback to full screen only if all automatic window methods fail
-      this.log('All automatic window capture methods failed, falling back to full screen');
+      this.log('🖥️ All intelligent window capture methods failed, falling back to full screen');
       const img = await screenshot({ filename: screenshotPath });
-      this.log(`Full screenshot saved to: ${screenshotPath}`);
+      this.log(`📷 Full screenshot saved to: ${screenshotPath}`);
       return screenshotPath;
     } catch (error) {
-      this.log('Screenshot capture completely failed', error.message);
+      this.log('💥 Screenshot capture completely failed', error.message);
       throw error;
     }
   }
@@ -269,28 +276,58 @@ class ContextCapture {
     try {
       this.log('Getting window geometry for bounds capture...');
       
-      // Improved AppleScript with better error handling and number formatting
-      const boundsScript = `tell application "System Events"
+      // Use a simpler, more reliable approach by writing AppleScript to temp file
+      const tempDir = os.tmpdir();
+      const scriptPath = path.join(tempDir, `flowclip_window_bounds_${Date.now()}.scpt`);
+      
+      const appleScript = `tell application "System Events"
         try
           set frontApp to first application process whose frontmost is true
+		set allWindows to every window of frontApp
+		set bestWindow to null
+		set maxArea to 0
+		
+		repeat with currentWindow in allWindows
+			try
+				if visible of currentWindow is true then
+					set windowSize to size of currentWindow
+					set w to item 1 of windowSize as integer
+					set h to item 2 of windowSize as integer
+					set area to w * h
+					if w > 300 and h > 200 and area > maxArea then
+						set maxArea to area
+						set bestWindow to currentWindow
+					end if
+				end if
+			end try
+		end repeat
+		
+		if bestWindow is null then
           if exists front window of frontApp then
-            set frontWindow to front window of frontApp
-            set windowPos to position of frontWindow
-            set windowSize to size of frontWindow
+				set bestWindow to front window of frontApp
+			else
+				return "NONE"
+			end if
+		end if
+		
+		set windowPos to position of bestWindow
+		set windowSize to size of bestWindow
             set x to item 1 of windowPos as integer
             set y to item 2 of windowPos as integer
             set w to item 1 of windowSize as integer
             set h to item 2 of windowSize as integer
             return (x as string) & "," & (y as string) & "," & (w as string) & "," & (h as string)
-          else
-            return "NONE"
-          end if
+		
         on error errMsg
           return "ERROR:" & errMsg
         end try
       end tell`;
 
-      const { stdout } = await execAsync(`osascript -e '${boundsScript}'`);
+      // Write script to temp file
+      fs.writeFileSync(scriptPath, appleScript);
+      
+      try {
+        const { stdout } = await execAsync(`osascript "${scriptPath}"`);
       const boundsStr = stdout.trim();
       this.log('Window bounds result:', boundsStr);
       
@@ -300,14 +337,14 @@ class ContextCapture {
           const [x, y, width, height] = parts.map(Number);
           
           if (width > 50 && height > 50 && !isNaN(x) && !isNaN(y)) { // Ensure reasonable window size
-            this.log(`Capturing window at bounds: x=${x}, y=${y}, w=${width}, h=${height}`);
+              this.log(`Capturing main content window at bounds: x=${x}, y=${y}, w=${width}, h=${height}`);
             
             // Use screencapture with specific region
             await execAsync(`screencapture -R ${x},${y},${width},${height} -x "${screenshotPath}"`);
             
             if (fs.existsSync(screenshotPath)) {
               const stats = fs.statSync(screenshotPath);
-              this.log(`Window bounds screenshot created, size: ${stats.size} bytes`);
+                this.log(`Main content window screenshot created, size: ${stats.size} bytes`);
               return screenshotPath;
             }
           } else {
@@ -318,6 +355,16 @@ class ContextCapture {
         }
       } else {
         this.log('Bounds capture returned error or no window:', boundsStr);
+        }
+      } finally {
+        // Clean up temp file
+        try {
+          if (fs.existsSync(scriptPath)) {
+            fs.unlinkSync(scriptPath);
+          }
+        } catch (cleanupError) {
+          this.log('Could not clean up temp script file:', cleanupError.message);
+        }
       }
       
       return null;
@@ -329,15 +376,30 @@ class ContextCapture {
 
   async captureFrontmostWindow(screenshotPath) {
     try {
-      this.log('Attempting simple frontmost window capture...');
+      this.log('Attempting smart frontmost window capture...');
       
-      // Try using screencapture with -w flag for frontmost window
-      // The -w flag captures the frontmost window automatically
+      // First try to get the best content window using our smart method
+      const bestWindow = await this.getBestContentWindow();
+      if (bestWindow && bestWindow.width > 300 && bestWindow.height > 200) {
+        this.log(`Found best content window: ${bestWindow.title} (${bestWindow.width}x${bestWindow.height})`);
+        
+        // Use screencapture with specific region for the best window
+        await execAsync(`screencapture -R ${bestWindow.x},${bestWindow.y},${bestWindow.width},${bestWindow.height} -x "${screenshotPath}"`);
+        
+        if (fs.existsSync(screenshotPath)) {
+          const stats = fs.statSync(screenshotPath);
+          this.log(`Smart content window screenshot created, size: ${stats.size} bytes`);
+          return screenshotPath;
+        }
+      }
+      
+      // Fallback to standard frontmost capture if smart method fails
+      this.log('Smart method failed, falling back to standard frontmost capture...');
       await execAsync(`screencapture -w -x "${screenshotPath}"`);
       
       if (fs.existsSync(screenshotPath)) {
         const stats = fs.statSync(screenshotPath);
-        this.log(`Frontmost window screenshot created, size: ${stats.size} bytes`);
+        this.log(`Fallback frontmost window screenshot created, size: ${stats.size} bytes`);
         return screenshotPath;
       }
       
@@ -346,6 +408,137 @@ class ContextCapture {
       this.log('Frontmost window capture error:', error.message);
       return null;
     }
+  }
+
+  // New helper method to get the best content window (avoiding dialogs)
+  async getBestContentWindow() {
+    try {
+      if (process.platform !== 'darwin') {
+        return null;
+      }
+
+      // Use file-based AppleScript approach for better reliability
+      const tempDir = os.tmpdir();
+      const scriptPath = path.join(tempDir, `flowclip_best_window_${Date.now()}.scpt`);
+      
+      const appleScript = `tell application "System Events"
+	try
+		set frontApp to first application process whose frontmost is true
+		set allWindows to every window of frontApp
+		set bestWindow to null
+		set maxArea to 0
+		
+		repeat with currentWindow in allWindows
+			try
+				if visible of currentWindow is true then
+					set windowSize to size of currentWindow
+					set w to item 1 of windowSize as integer
+					set h to item 2 of windowSize as integer
+					set area to w * h
+					if w > 300 and h > 200 and area > maxArea then
+						set maxArea to area
+						set bestWindow to currentWindow
+					end if
+				end if
+			end try
+		end repeat
+		
+		if bestWindow is not null then
+			set windowPos to position of bestWindow
+			set windowSize to size of bestWindow
+			set windowTitle to name of bestWindow
+			set x to item 1 of windowPos as integer
+			set y to item 2 of windowPos as integer
+			set w to item 1 of windowSize as integer
+			set h to item 2 of windowSize as integer
+			return (x as string) & "," & (y as string) & "," & (w as string) & "," & (h as string) & "," & windowTitle
+		else
+			return "NONE"
+		end if
+	on error
+		return "ERROR"
+	end try
+end tell`;
+
+      // Write script to temp file
+      fs.writeFileSync(scriptPath, appleScript);
+      
+      try {
+        const { stdout } = await execAsync(`osascript "${scriptPath}"`);
+        const result = stdout.trim();
+        
+        if (!result || result === 'NONE' || result === 'ERROR') {
+          this.log('Could not get best content window:', result);
+          return null;
+        }
+
+        // Parse the result
+        const parts = result.split(',');
+        if (parts.length >= 4) {
+          const [x, y, width, height] = parts.map(Number);
+          const title = parts.slice(4).join(',') || 'Unknown';
+          
+          if (!isNaN(x) && !isNaN(y) && !isNaN(width) && !isNaN(height)) {
+            return {
+              x,
+              y,
+              width,
+              height,
+              title,
+              area: width * height
+            };
+          }
+        }
+
+        return null;
+      } finally {
+        // Clean up temp file
+        try {
+          if (fs.existsSync(scriptPath)) {
+            fs.unlinkSync(scriptPath);
+          }
+        } catch (cleanupError) {
+          this.log('Could not clean up temp script file:', cleanupError.message);
+        }
+      }
+    } catch (error) {
+      this.log('Error getting best content window:', error.message);
+      return null;
+    }
+  }
+
+  // Helper method to detect likely dialog/notification windows
+  isLikelyDialog(window) {
+    // Size-based detection
+    if (window.width < 300 || window.height < 200) {
+      return true;
+    }
+    
+    // Very small windows are likely dialogs
+    if (window.area < 60000) { // Less than ~300x200
+      return true;
+    }
+    
+    // Title-based detection
+    const title = window.title ? window.title.toLowerCase() : '';
+    const dialogKeywords = [
+      'alert', 'warning', 'error', 'confirm', 'dialog', 'notification',
+      'sharing', 'permission', 'allow', 'access', 'security', 'privacy',
+      'microphone', 'camera', 'screen recording', 'location'
+    ];
+    
+    const hasDialogKeyword = dialogKeywords.some(keyword => title.includes(keyword));
+    if (hasDialogKeyword) {
+      return true;
+    }
+    
+    // Aspect ratio check - very wide or very tall windows might be notifications
+    const aspectRatio = window.width / window.height;
+    if (aspectRatio > 4 || aspectRatio < 0.25) {
+      return true;
+    }
+    
+    return false;
   }
 
   async captureActiveWindowScreenshot(screenshotPath) {

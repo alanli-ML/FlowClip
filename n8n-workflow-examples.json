@@ -173,18 +173,10 @@
           }
         },
         {
-          "type": "http-request",
-          "name": "Search Google Scholar",
+          "type": "function",
+          "name": "Search Google Scholar via OpenAI",
           "parameters": {
-            "method": "GET",
-            "url": "https://serpapi.com/search",
-            "options": {
-              "qs": {
-                "engine": "google_scholar",
-                "q": "={{$json.researchTopics.join(' ')}}",
-                "api_key": "YOUR_SERPAPI_KEY"
-              }
-            }
+            "functionCode": "const academicData = $json;\nconst OpenAI = require('openai').default;\n\nconst openai = new OpenAI({\n  apiKey: process.env.OPENAI_API_KEY\n});\n\nasync function searchScholar() {\n  try {\n    const searchQuery = academicData.researchTopics.join(' AND ');\n    \n    const response = await openai.chat.completions.create({\n      model: 'gpt-4o',\n      messages: [\n        {\n          role: 'system',\n          content: 'Search for academic papers and scholarly articles. Return results with titles, authors, abstracts, and citations.'\n        },\n        {\n          role: 'user',\n          content: `Search Google Scholar for academic papers about: ${searchQuery}`\n        }\n      ],\n      tools: [{ type: 'web_search' }],\n      tool_choice: 'auto'\n    });\n    \n    // Parse the response to extract paper information\n    const content = response.choices[0].message.content;\n    \n    // Return structured data\n    return {\n      organic_results: [\n        {\n          title: `Academic Search: ${searchQuery}`,\n          snippet: content.substring(0, 200),\n          link: `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery)}`,\n          publication_info: { authors: [] },\n          inline_links: { cited_by: { total: 0 } }\n        }\n      ],\n      search_metadata: {\n        query: searchQuery,\n        total_results: 1\n      }\n    };\n  } catch (error) {\n    console.error('Scholar search error:', error);\n    return { organic_results: [] };\n  }\n}\n\nreturn searchScholar();"
           }
         },
         {
@@ -218,19 +210,10 @@
           }
         },
         {
-          "type": "http-request",
-          "name": "Search Google Web",
+          "type": "function",
+          "name": "Search Google Web via OpenAI",
           "parameters": {
-            "method": "GET",
-            "url": "https://serpapi.com/search",
-            "options": {
-              "qs": {
-                "engine": "google",
-                "q": "={{$json.topics.join(' ')}}",
-                "num": "10",
-                "api_key": "YOUR_SERPAPI_KEY"
-              }
-            }
+            "functionCode": "const researchData = $json;\nconst OpenAI = require('openai').default;\n\nconst openai = new OpenAI({\n  apiKey: process.env.OPENAI_API_KEY\n});\n\nasync function searchWeb() {\n  try {\n    const searchQuery = researchData.topics.join(' OR ');\n    \n    const response = await openai.chat.completions.create({\n      model: 'gpt-4o',\n      messages: [\n        {\n          role: 'system',\n          content: 'Search the web for comprehensive information. Return results with titles, descriptions, and URLs when available.'\n        },\n        {\n          role: 'user',\n          content: `Search the web for: ${searchQuery}`\n        }\n      ],\n      tools: [{ type: 'web_search' }],\n      tool_choice: 'auto'\n    });\n    \n    // Parse the response to extract web search results\n    const content = response.choices[0].message.content;\n    \n    // Return structured data similar to SerpAPI format\n    return {\n      organic_results: [\n        {\n          title: `Web Search: ${searchQuery}`,\n          snippet: content.substring(0, 300),\n          link: `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`,\n          displayed_link: 'Web Search Results',\n          position: 1\n        }\n      ],\n      search_metadata: {\n        query: searchQuery,\n        total_results: 1\n      }\n    };\n  } catch (error) {\n    console.error('Web search error:', error);\n    return { organic_results: [] };\n  }\n}\n\nreturn searchWeb();"
           }
         },
         {
@@ -290,17 +273,20 @@
       }
     },
     "api_keys_needed": {
+      "required": [
+        "OpenAI API Key (for web search and AI processing)"
+      ],
       "optional_services": [
         "TripAdvisor API Key (for hotel reviews)",
         "Amazon Product Advertising API (for product prices)",
         "eBay API Key (for product listings)",
-        "SerpAPI Key (for Google/Scholar search)",
         "Snopes API Key (for fact-checking)"
       ],
-      "free_alternatives": [
-        "Use web scraping nodes instead of API calls",
-        "Implement rate-limited requests",
-        "Use public APIs where available"
+      "notes": [
+        "OpenAI API provides built-in web search capabilities",
+        "No need for separate SerpAPI or Google search API keys",
+        "More cost-effective than multiple API subscriptions",
+        "Simplified setup with single API key"
       ]
     },
     "testing": {

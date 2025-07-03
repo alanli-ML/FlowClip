@@ -9,6 +9,7 @@ const PermissionManager = require('./services/permissionManager');
 const WorkflowEngine = require('./services/workflowEngine');
 const PasteAssistant = require('./services/pasteAssistant');
 const SessionManager = require('./services/sessionManager');
+const ConsolidatedSessionSummarizer = require('./services/consolidatedSessionSummarizer');
 const ExternalApiService = require('./services/externalApiService');
 const Store = require('electron-store');
 
@@ -20,16 +21,18 @@ class FlowClipApp {
     this.mainWindow = null;
     this.tray = null;
     this.database = new Database();
-    this.aiService = new AIService();
+    this.aiService = new AIService(this.database);
     this.contextCapture = new ContextCapture();
     this.permissionManager = new PermissionManager();
     this.workflowEngine = new WorkflowEngine(this.database, this.aiService);
     this.pasteAssistant = new PasteAssistant(this.database, this.aiService);
     this.externalApiService = new ExternalApiService();
-    this.sessionManager = new SessionManager(this.database, this.aiService, this.externalApiService);
+    this.consolidatedSummarizer = new ConsolidatedSessionSummarizer(this.aiService);
+    this.sessionManager = new SessionManager(this.database, this.aiService, this.externalApiService, this.workflowEngine, this.consolidatedSummarizer);
     this.isMonitoring = false;
     this.lastClipboardContent = '';
     this.clipboardCheckInterval = null;
+    this.overlayCheckInterval = null;
     this.isFirstRun = store.get('isFirstRun', true);
   }
 
@@ -58,8 +61,103 @@ class FlowClipApp {
       }
     });
 
-    this.workflowEngine.on('workflow-completed', (event) => {
-      console.log('Workflow completed:', event.executionId);
+    this.workflowEngine.on('workflow-completed', async (event) => {
+      console.log('🔄 Workflow completed event received:', {
+        workflowId: event.workflowId,
+        executionId: event.executionId,
+        hasResult: !!event.result,
+        resultKeys: event.result ? Object.keys(event.result) : []
+      });
+      
+      // Handle content-analysis workflow completion
+      if (event.workflowId === 'content-analysis') {
+        console.log('✅ Content-analysis workflow detected');
+        
+        if (event.result && event.result['save-results']) {
+          console.log('✅ Save-results found in workflow result');
+          const saveResult = event.result['save-results'];
+          console.log('📊 Save result details:', {
+            saved: saveResult.saved,
+            tagsUpdated: saveResult.tagsUpdated,
+            actionsStored: saveResult.actionsStored,
+            unified: saveResult.unified
+          });
+          
+          try {
+            // Find the clipboard item ID from the workflow execution data
+            const executionData = this.workflowEngine.getExecution(event.executionId);
+            console.log('📋 Execution data:', {
+              hasData: !!executionData,
+              dataKeys: executionData ? Object.keys(executionData) : [],
+              hasClipboardItem: !!(executionData?.data?.clipboardItem),
+              clipboardItemId: executionData?.data?.clipboardItem?.id
+            });
+            
+            const clipboardItemId = executionData?.data?.clipboardItem?.id;
+            const clipboardItem = executionData?.data?.clipboardItem;
+            
+            if (clipboardItemId && clipboardItem) {
+              console.log(`🔍 Processing clipboard item ${clipboardItemId}`);
+              
+              // Fetch the updated clipboard item with comprehensive analysis
+              const updatedItem = await this.database.getClipboardItem(clipboardItemId);
+              console.log('📦 Updated item from database:', {
+                found: !!updatedItem,
+                hasAnalysisData: !!(updatedItem?.analysis_data),
+                analysisDataLength: updatedItem?.analysis_data?.length
+              });
+              
+              if (updatedItem) {
+                console.log(`✅ Comprehensive analysis complete for item ${clipboardItemId}`);
+                
+                // NOW process session membership with comprehensive analysis available
+                console.log('🔄 Processing session membership after comprehensive analysis completion...');
+                try {
+                  await this.sessionManager.processClipboardItem(updatedItem);
+                  console.log('✅ Session processing completed successfully');
+                } catch (sessionError) {
+                  console.error('❌ Session processing failed:', sessionError);
+                }
+                
+                // If tags or actions were updated, refresh the UI
+                if (saveResult.tagsUpdated || saveResult.actionsStored) {
+                  if (this.mainWindow) {
+                    // Safely handle tags count - they could be null, string, or array
+                    let tagCount = 0;
+                    if (updatedItem.tags) {
+                      if (Array.isArray(updatedItem.tags)) {
+                        tagCount = updatedItem.tags.length;
+                      } else if (typeof updatedItem.tags === 'string') {
+                        tagCount = updatedItem.tags.length > 0 ? updatedItem.tags.split(',').length : 0;
+                      }
+                    }
+                    
+                    console.log(`🏷️ Refreshing UI for clipboard item ${clipboardItemId} with ${tagCount} tags`);
+                    this.mainWindow.webContents.send('clipboard-item-updated', {
+                      clipboardItem: updatedItem,
+                      tagsUpdated: saveResult.tagsUpdated,
+                      actionsStored: saveResult.actionsStored,
+                      unified: saveResult.unified
+                    });
+                  }
+                }
+              } else {
+                console.log(`❌ Could not retrieve updated clipboard item ${clipboardItemId} after analysis`);
+              }
+            } else {
+              console.log('❌ No clipboard item found in workflow execution data');
+            }
+          } catch (error) {
+            console.error('❌ Error processing clipboard item after comprehensive analysis completion:', error);
+          }
+        } else {
+          console.log('❌ No save-results found in workflow result');
+        }
+      } else {
+        console.log(`ℹ️  Workflow ${event.workflowId} completed, but not content-analysis`);
+      }
+
+      // Send generic workflow completion to renderer
       if (this.mainWindow) {
         this.mainWindow.webContents.send('workflow-completed', event);
       }
@@ -93,6 +191,40 @@ class FlowClipApp {
       
       if (this.mainWindow) {
         this.mainWindow.webContents.send('session-updated', event);
+      }
+    });
+
+    // Session research events
+    this.sessionManager.on('session-research-completed', (data) => {
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-research-completed', data);
+      }
+    });
+
+    this.sessionManager.on('session-research-failed', (data) => {
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-research-failed', data);
+      }
+    });
+
+    this.sessionManager.on('session-research-started', (data) => {
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-research-started', data);
+      }
+    });
+
+    // Session research progress events
+    this.sessionManager.on('session-research-progress', (data) => {
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-research-progress', data);
+      }
+    });
+
+    // Session comprehensive analysis events
+    this.sessionManager.on('session-analysis-updated', (event) => {
+      console.log('Session comprehensive analysis updated:', event.sessionId, 'research findings:', event.analysisData.totalResearchFindings);
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('session-analysis-updated', event);
       }
     });
 
@@ -130,8 +262,6 @@ class FlowClipApp {
       }
     });
   }
-
-
 
   setupApp() {
     // Handle app ready
@@ -490,8 +620,8 @@ class FlowClipApp {
           this.mainWindow.webContents.send('clipboard-item-added', clipboardItem);
         }
 
-        // Process session membership for new content
-        await this.sessionManager.processClipboardItem(clipboardItem);
+        // NOTE: Session processing moved to workflow completion handler
+        // This ensures comprehensive analysis is complete before session processing
 
         // Trigger workflows for new clipboard content
         await this.workflowEngine.triggerWorkflows('clipboard-change', {
@@ -499,9 +629,9 @@ class FlowClipApp {
           context: context
         });
 
-        // Legacy AI analysis (kept for backwards compatibility)
-        // The workflow engine now handles this more systematically
-        this.aiService.analyzeClipboardItem(clipboardItem);
+        // Note: AI analysis is now handled by the unified workflow engine
+        // The comprehensive workflow handles tagging, actions, and analysis in one call
+        // Session processing happens AFTER comprehensive analysis completes
       }
 
       // Notify PasteAssistant of clipboard change (for both new and existing content)
@@ -511,27 +641,35 @@ class FlowClipApp {
       this.updateTrayMenu();
 
     } catch (error) {
-      console.error('Error handling clipboard change:', error);
+      console.error('Clipboard handling error:', error);
     }
   }
 
   async findExistingClipboardItem(content) {
     try {
-      const items = await this.database.getClipboardHistory({ limit: 50 });
+      const items = await this.database.getClipboardHistory({ limit: 1 });
       
-      // First try exact match
-      let match = items.find(item => item.content === content);
-      
-      if (!match) {
-        // Try normalized match (trim whitespace and normalize newlines)
-        const normalizedContent = content.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        match = items.find(item => {
-          const itemContent = item.content.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-          return itemContent === normalizedContent;
-        });
+      // Only check against the most recent item (items[0])
+      if (!items || items.length === 0) {
+        return null;
       }
       
-      return match || null;
+      const mostRecentItem = items[0];
+      
+      // First try exact match with most recent item
+      if (mostRecentItem.content === content) {
+        return mostRecentItem;
+      }
+      
+      // Try normalized match (trim whitespace and normalize newlines) with most recent item
+        const normalizedContent = content.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const recentItemContent = mostRecentItem.content.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      
+      if (recentItemContent === normalizedContent) {
+        return mostRecentItem;
+      }
+      
+      return null;
     } catch (error) {
       console.error('Error finding existing clipboard item:', error);
       return null;
@@ -594,7 +732,7 @@ class FlowClipApp {
     const fallbackActions = {
       'url': [
         { action: 'research', priority: 'high', reason: 'Explore this link for more information', confidence: 0.8 },
-        { action: 'save_reference', priority: 'medium', reason: 'Save for future reference', confidence: 0.7 }
+        { action: 'cite', priority: 'medium', reason: 'Add proper citation for this URL', confidence: 0.7 }
       ],
       'email': [
         { action: 'respond', priority: 'high', reason: 'Draft a response to this email', confidence: 0.8 },
@@ -602,19 +740,19 @@ class FlowClipApp {
       ],
       'code': [
         { action: 'explain', priority: 'high', reason: 'Explain how this code works', confidence: 0.8 },
-        { action: 'save_reference', priority: 'medium', reason: 'Save code snippet for reference', confidence: 0.7 }
+        { action: 'create_task', priority: 'medium', reason: 'Create task to review this code', confidence: 0.7 }
       ],
       'phone': [
-        { action: 'save_reference', priority: 'high', reason: 'Save contact information', confidence: 0.8 },
+        { action: 'create_task', priority: 'high', reason: 'Create task to contact this person', confidence: 0.8 },
         { action: 'schedule', priority: 'medium', reason: 'Schedule a call', confidence: 0.6 }
       ],
       'data': [
         { action: 'explain', priority: 'high', reason: 'Explain the data structure', confidence: 0.7 },
-        { action: 'save_reference', priority: 'medium', reason: 'Save data for analysis', confidence: 0.6 }
+        { action: 'research', priority: 'medium', reason: 'Research related data patterns', confidence: 0.6 }
       ],
       'text': [
         { action: 'summarize', priority: 'medium', reason: 'Create a summary of this text', confidence: 0.6 },
-        { action: 'save_reference', priority: 'medium', reason: 'Save for future reference', confidence: 0.7 }
+        { action: 'explain', priority: 'medium', reason: 'Get explanation of this content', confidence: 0.7 }
       ]
     };
 
@@ -624,12 +762,50 @@ class FlowClipApp {
   setupIPC() {
     // Get clipboard history
     ipcMain.handle('get-clipboard-history', async (event, options = {}) => {
-      return await this.database.getClipboardHistory(options);
+      const items = await this.database.getClipboardHistory(options);
+      
+      // Parse and include workflow results for each item
+      return items.map(item => {
+        let workflowResults = null;
+        if (item.analysis_data) {
+          try {
+            const analysisData = JSON.parse(item.analysis_data);
+            workflowResults = analysisData.workflowResults || null;
+          } catch (error) {
+            console.error('Error parsing analysis_data for item', item.id, ':', error);
+          }
+        }
+        
+        return {
+          ...item,
+          workflowResults: workflowResults
+        };
+      });
     });
 
     // Get single clipboard item
     ipcMain.handle('get-clipboard-item', async (event, id) => {
-      return await this.database.getClipboardItem(id);
+      const item = await this.database.getClipboardItem(id);
+      if (!item) {
+        return null;
+      }
+
+      // Parse and include workflow results if available
+      let workflowResults = null;
+      if (item.analysis_data) {
+        try {
+          const analysisData = JSON.parse(item.analysis_data);
+          workflowResults = analysisData.workflowResults || null;
+        } catch (error) {
+          console.error('Error parsing analysis_data for workflow results:', error);
+        }
+      }
+
+      // Return item with parsed workflow results
+      return {
+        ...item,
+        workflowResults: workflowResults
+      };
     });
 
     // Get recommended actions for clipboard item
@@ -641,9 +817,34 @@ class FlowClipApp {
           return { error: 'Clipboard item not found' };
         }
 
-        // Check if we already have action recommendations
+        // Check if we already have action recommendations from workflows
         const aiTasks = await this.database.getAITasksForClipboardItem(clipboardItemId);
-        const actionTask = aiTasks.find(task => task.task_type === 'langgraph_action_recommendation');
+        
+        // First check for workflow_actions (new format)
+        let actionTask = aiTasks.find(task => task.task_type === 'workflow_actions');
+        
+        if (actionTask && actionTask.status === 'completed' && actionTask.task_data) {
+          try {
+            let taskData = actionTask.task_data;
+            if (typeof taskData === 'string') {
+              taskData = JSON.parse(taskData);
+            }
+            
+            if (taskData.actions && Array.isArray(taskData.actions)) {
+              console.log(`Found ${taskData.actions.length} cached actions from workflow`);
+              return {
+                recommendedActions: taskData.actions,
+                confidence: 0.8,
+                cached: true
+              };
+            }
+          } catch (parseError) {
+            console.error('Error parsing workflow actions:', parseError);
+          }
+        }
+        
+        // Fall back to old format
+        actionTask = aiTasks.find(task => task.task_type === 'langgraph_action_recommendation');
         
         if (actionTask && actionTask.status === 'completed' && actionTask.result) {
           try {
@@ -658,8 +859,16 @@ class FlowClipApp {
           }
         }
 
-        // If no cached recommendations, generate them using LangGraph
+        // If no cached recommendations, check if AI service is running workflows
+        // The workflow engine should have already generated actions when clipboard was captured
+        // So if we're here, it means either:
+        // 1. Workflows are disabled
+        // 2. This is an old clipboard item before workflow implementation
+        // 3. The workflow failed
+        
+        // For old items, we can trigger a one-time comprehensive analysis
         if (this.aiService.isConfigured() && this.aiService.langGraphClient) {
+          console.log('No cached actions found, running unified comprehensive analysis...');
           const workflowData = {
             content: clipboardItem.content,
             context: {
@@ -671,14 +880,18 @@ class FlowClipApp {
             }
           };
 
-          const result = await this.aiService.langGraphClient.executeWorkflow('action_recommendation', workflowData);
+          const result = await this.aiService.langGraphClient.executeWorkflow('comprehensive_content_analysis', workflowData);
           
-          // Save the result for future use
+          // Save the result for future use in new format
           const { v4: uuidv4 } = require('uuid');
           await this.database.saveAITask({
             id: uuidv4(),
             clipboard_item_id: clipboardItemId,
-            task_type: 'langgraph_action_recommendation',
+            task_type: 'workflow_actions',
+            task_data: JSON.stringify({ 
+              workflow: 'comprehensive_content_analysis',
+              actions: result.recommendedActions || []
+            }),
             status: 'completed',
             result: JSON.stringify(result),
             error: null
@@ -686,7 +899,7 @@ class FlowClipApp {
 
           return {
             recommendedActions: result.recommendedActions || [],
-            confidence: result.confidence || 0.7,
+            confidence: result.actionConfidence || 0.7,
             cached: false
           };
         }
@@ -799,6 +1012,18 @@ class FlowClipApp {
     // Clear all sessions
     ipcMain.handle('clear-all-sessions', async () => {
       return await this.sessionManager.clearAllSessions();
+    });
+
+    // Session research action
+    ipcMain.handle('perform-session-research', async (event, sessionId) => {
+      try {
+        console.log(`Main: Performing session research for session ${sessionId}`);
+        const result = await this.sessionManager.performSessionResearch(sessionId);
+        return { success: true, result };
+      } catch (error) {
+        console.error('Main: Session research failed:', error);
+        return { success: false, error: error.message };
+      }
     });
 
     // Permission management IPC handlers

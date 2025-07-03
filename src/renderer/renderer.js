@@ -3,8 +3,14 @@ const { ipcRenderer } = require('electron');
 class FlowClipRenderer {
   constructor() {
     this.currentView = 'history';
-    this.currentItems = [];
-    this.selectedItem = null;
+    this.currentPage = 1;
+    this.itemsPerPage = 50;
+    this.allClipboardItems = [];
+    this.filteredItems = [];
+    this.currentClipboardItem = null;
+    this.currentSession = null;
+    this.currentModalSessionId = null;
+    this.currentSessions = [];
     this.searchTimeout = null;
     this.settings = {};
     
@@ -191,6 +197,13 @@ class FlowClipRenderer {
       this.showToast('New clipboard item captured', 'success');
     });
 
+    ipcRenderer.on('clipboard-item-updated', (event, data) => {
+      this.updateClipboardItemInUI(data.clipboardItem, data);
+      if (data.tagsUpdated) {
+        this.showToast('Tags updated for clipboard item', 'success');
+      }
+    });
+
     // Listen for view changes
     ipcRenderer.on('show-clipboard-history', () => {
       this.switchView('history');
@@ -207,6 +220,38 @@ class FlowClipRenderer {
 
     ipcRenderer.on('session-updated', (event, data) => {
       this.handleSessionUpdated(data);
+    });
+
+    // Session comprehensive analysis events
+    ipcRenderer.on('session-analysis-updated', (event, data) => {
+      this.handleSessionAnalysisUpdated(data);
+    });
+
+    // Session-level research events  
+    ipcRenderer.on('session-research-completed', (event, data) => {
+      this.handleSessionResearchCompleted(data);
+    });
+
+    ipcRenderer.on('session-research-failed', (event, data) => {
+      this.handleSessionResearchFailed(data);
+    });
+
+    ipcRenderer.on('session-research-started', (event, data) => {
+      this.handleSessionResearchStarted(data);
+    });
+
+    // Session research progress events
+    ipcRenderer.on('session-research-progress', (event, data) => {
+      this.handleSessionResearchProgress(data);
+    });
+
+    // Item-level session research events (separate from session-level)
+    ipcRenderer.on('session-item-research-completed', (event, data) => {
+      this.handleSessionItemResearchCompleted(data);
+    });
+
+    ipcRenderer.on('session-item-research-failed', (event, data) => {
+      this.handleSessionItemResearchFailed(data);
     });
 
     ipcRenderer.on('hotel-research-alert', (event, data) => {
@@ -253,7 +298,8 @@ class FlowClipRenderer {
     try {
       this.showLoading(true);
       const items = await ipcRenderer.invoke('get-clipboard-history', { limit: 50 });
-      this.currentItems = items;
+      this.allClipboardItems = items;
+      this.filteredItems = items;
       this.renderClipboardItems(items);
       this.populateSourceAppFilter(items);
     } catch (error) {
@@ -266,6 +312,7 @@ class FlowClipRenderer {
 
   renderClipboardItems(items) {
     const container = document.getElementById('clipboard-items');
+    container.innerHTML = '';
     
     if (items.length === 0) {
       container.innerHTML = `
@@ -278,19 +325,152 @@ class FlowClipRenderer {
       return;
     }
 
-    container.innerHTML = items.map(item => this.createClipboardItemHTML(item)).join('');
+    items.forEach(item => {
+      const itemElement = document.createElement('div');
+      itemElement.innerHTML = this.createClipboardItemHTML(item);
+      const clipboardItemElement = itemElement.firstElementChild;
+      container.appendChild(clipboardItemElement);
 
-    container.querySelectorAll('.clipboard-item').forEach(element => {
-      element.addEventListener('click', () => {
-        const itemId = element.dataset.itemId;
-        this.openClipboardItem(itemId);
-      });
+      // Add click event listener for opening the item modal
+      clipboardItemElement.addEventListener('click', () => {
+        this.openClipboardItem(item.id);
     });
 
     // Load recommended actions for each item
-    items.forEach(item => {
       this.loadRecommendedActions(item.id);
+      
+      // Display historical workflow results if available
+      this.displayHistoricalResults(item);
     });
+  }
+
+  async displayHistoricalResults(item) {
+    // Only get historical results if the item has workflowResults
+    if (!item.workflowResults) {
+      // For items that might have workflow results but weren't loaded yet, 
+      // fetch them from the database
+      try {
+        const fullItem = await ipcRenderer.invoke('get-clipboard-item', item.id);
+        if (fullItem && fullItem.workflowResults) {
+          this.populateHistoricalResults(item.id, fullItem.workflowResults);
+        }
+      } catch (error) {
+        console.error('Error fetching full item data:', error);
+      }
+    } else {
+      this.populateHistoricalResults(item.id, item.workflowResults);
+    }
+  }
+
+  populateHistoricalResults(itemId, workflowResults) {
+    if (!workflowResults || Object.keys(workflowResults).length === 0) {
+      return;
+    }
+
+    // For each workflow type that has results, display the most recent result
+    Object.entries(workflowResults).forEach(([workflowType, results]) => {
+      if (results && results.length > 0) {
+        const mostRecentResult = results[0];
+        
+        // Convert workflow result to the format expected by updateClipboardEntryWithResult
+        const convertedResult = this.convertWorkflowResultToActionResult(workflowType, mostRecentResult);
+        
+        if (convertedResult) {
+          // Use the existing updateClipboardEntryWithResult method but mark it as historical
+          this.updateClipboardEntryWithHistoricalResult(itemId, workflowType, convertedResult, mostRecentResult.executedAt);
+        }
+      }
+    });
+  }
+
+  convertWorkflowResultToActionResult(workflowType, workflowResult) {
+    // Convert workflow-specific results to the format expected by formatActionResult
+    switch (workflowType) {
+      case 'research':
+        return {
+          research_summary: workflowResult.researchSummary,
+          researchSummary: workflowResult.researchSummary,
+          key_findings: workflowResult.keyFindings,
+          keyFindings: workflowResult.keyFindings,
+          sources: workflowResult.sources,
+          total_sources: workflowResult.totalSources,
+          totalSources: workflowResult.totalSources,
+          confidence: workflowResult.confidence
+        };
+      
+      case 'summarize':
+        return {
+          summary: workflowResult.finalSummary || workflowResult.summary,
+          finalSummary: workflowResult.finalSummary,
+          qualityScore: workflowResult.qualityScore,
+          keyPoints: workflowResult.keyPoints,
+          word_count: workflowResult.word_count,
+          summary_ratio: workflowResult.summary_ratio
+        };
+      
+      case 'fact_check':
+        return {
+          fact_check_analysis: workflowResult.analysis,
+          confidence_level: workflowResult.confidence
+        };
+      
+      case 'create_task':
+        return {
+          title: workflowResult.title,
+          description: workflowResult.description,
+          priority: workflowResult.priority,
+          estimated_time: workflowResult.estimated_time
+        };
+      
+      case 'translate':
+        return {
+          translated_text: workflowResult.translatedText,
+          target_language: workflowResult.targetLanguage
+        };
+      
+      case 'explain':
+        return {
+          explanation: workflowResult.explanation,
+          key_concepts: workflowResult.keyConcepts
+        };
+      
+      default:
+        // For unknown workflow types, try to extract common result patterns
+        return workflowResult;
+    }
+  }
+
+  updateClipboardEntryWithHistoricalResult(itemId, action, result, executedAt) {
+    const resultsContainer = document.querySelector(`.clipboard-item-action-results[data-item-id="${itemId}"]`);
+    if (!resultsContainer) return;
+
+    const config = this.getActionConfig(action);
+    const formattedResult = this.formatActionResult(action, result);
+    
+    // Create result element with historical indicator
+    const resultElement = document.createElement('div');
+    resultElement.className = 'action-result historical-result';
+    
+    const timeAgo = executedAt ? this.formatTimeAgo(new Date(executedAt)) : 'Previously';
+    
+    resultElement.innerHTML = `
+      <div class="action-result-header">
+        <i class="fas fa-${config.icon}"></i>
+        <span class="action-result-title">${config.label} Result</span>
+        <span class="historical-indicator" title="Executed ${timeAgo}">
+          <i class="fas fa-history"></i> ${timeAgo}
+        </span>
+        <button class="btn btn-xs action-result-close" onclick="this.parentElement.parentElement.remove()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="action-result-content">
+        ${formattedResult}
+      </div>
+    `;
+
+    resultsContainer.appendChild(resultElement);
+    resultsContainer.style.display = 'block';
   }
 
   createClipboardItemHTML(item) {
@@ -405,8 +585,6 @@ class FlowClipRenderer {
       'explain': { label: 'Explain', icon: 'lightbulb', description: 'Explain the content' },
       'expand': { label: 'Expand', icon: 'expand-alt', description: 'Get more details' },
       'create_task': { label: 'Task', icon: 'tasks', description: 'Create a task from this' },
-      'save_reference': { label: 'Save', icon: 'bookmark', description: 'Save for reference' },
-      'share': { label: 'Share', icon: 'share', description: 'Share this content' },
       'cite': { label: 'Cite', icon: 'quote-left', description: 'Create citation' },
       'respond': { label: 'Reply', icon: 'reply', description: 'Draft a response' },
       'schedule': { label: 'Schedule', icon: 'calendar', description: 'Schedule related activity' }
@@ -423,6 +601,7 @@ class FlowClipRenderer {
       }
 
       const result = await ipcRenderer.invoke('trigger-ai-task', itemId, action);
+      this.showAIResult(action, result.result);
       this.showToast(`${this.getActionConfig(action).label} completed successfully`, 'success');
       
       // Update the clipboard entry with the action result
@@ -671,8 +850,14 @@ class FlowClipRenderer {
   }
 
   truncateText(text, maxLength) {
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  }
+
+  escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   async openClipboardItem(itemId) {
@@ -683,7 +868,7 @@ class FlowClipRenderer {
         return;
       }
 
-      this.selectedItem = item;
+      this.currentClipboardItem = item;
       this.showItemModal(item);
     } catch (error) {
       console.error('Error opening clipboard item:', error);
@@ -709,24 +894,30 @@ class FlowClipRenderer {
       screenshotContainer.innerHTML = '';
     }
 
+    // Hide the workflow results section since we're now displaying everything in action results
+    const workflowResultsContainer = document.getElementById('workflow-results');
+    if (workflowResultsContainer) {
+      workflowResultsContainer.classList.add('hidden');
+    }
+
     modal.classList.add('active');
   }
 
   closeModal() {
     document.getElementById('item-modal').classList.remove('active');
     document.getElementById('ai-result').classList.add('hidden');
-    this.selectedItem = null;
+    this.currentClipboardItem = null;
   }
 
   async triggerAIAction(action) {
-    if (!this.selectedItem) return;
+    if (!this.currentClipboardItem) return;
 
     try {
       const aiButton = document.querySelector(`[data-action="${action}"]`);
       aiButton.disabled = true;
       aiButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
-      const result = await ipcRenderer.invoke('trigger-ai-task', this.selectedItem.id, action);
+      const result = await ipcRenderer.invoke('trigger-ai-task', this.currentClipboardItem.id, action);
       
       this.showAIResult(action, result.result);
       this.showToast(`${action} completed successfully`, 'success');
@@ -825,10 +1016,10 @@ class FlowClipRenderer {
   }
 
   async copyItemToClipboard() {
-    if (!this.selectedItem) return;
+    if (!this.currentClipboardItem) return;
 
     try {
-      await ipcRenderer.invoke('copy-to-clipboard', this.selectedItem.content);
+      await ipcRenderer.invoke('copy-to-clipboard', this.currentClipboardItem.content);
       this.showToast('Copied to clipboard', 'success');
       this.closeModal();
     } catch (error) {
@@ -838,14 +1029,14 @@ class FlowClipRenderer {
   }
 
   async deleteCurrentItem() {
-    if (!this.selectedItem) return;
+    if (!this.currentClipboardItem) return;
 
     if (!confirm('Are you sure you want to delete this clipboard item?')) {
       return;
     }
 
     try {
-      await ipcRenderer.invoke('delete-clipboard-item', this.selectedItem.id);
+      await ipcRenderer.invoke('delete-clipboard-item', this.currentClipboardItem.id);
       this.showToast('Clipboard item deleted', 'success');
       this.closeModal();
       this.loadClipboardHistory();
@@ -869,6 +1060,7 @@ class FlowClipRenderer {
       try {
         this.showLoading(true);
         const results = await ipcRenderer.invoke('search-clipboard', query);
+        this.filteredItems = results;
         this.renderClipboardItems(results);
       } catch (error) {
         console.error('Error searching:', error);
@@ -894,6 +1086,7 @@ class FlowClipRenderer {
     try {
       this.showLoading(true);
       const items = await ipcRenderer.invoke('get-clipboard-history', options);
+      this.filteredItems = items;
       this.renderClipboardItems(items);
     } catch (error) {
       console.error('Error applying filters:', error);
@@ -1066,8 +1259,63 @@ class FlowClipRenderer {
     this.loadRecommendedActions(item.id);
   }
 
+  updateClipboardItemInUI(updatedItem, updateData) {
+    console.log(`🔄 Updating clipboard item ${updatedItem.id} in UI`);
+    
+    const clipboardItems = document.getElementById('clipboard-items');
+    const existingElement = clipboardItems.querySelector(`[data-item-id="${updatedItem.id}"]`);
+    
+    if (!existingElement) {
+      console.log('Item not found in UI, adding as new item');
+      this.addClipboardItemToUI(updatedItem);
+      return;
+    }
+
+    // Update the currentItems array
+    const itemIndex = this.filteredItems.findIndex(item => item.id === updatedItem.id);
+    if (itemIndex !== -1) {
+      this.filteredItems[itemIndex] = updatedItem;
+    }
+
+    // Update tags in the UI
+    const tagsContainer = existingElement.querySelector('.clipboard-item-tags');
+    if (tagsContainer && updatedItem.tags) {
+      const tags = updatedItem.tags.split ? updatedItem.tags.split(',') : updatedItem.tags;
+      const tagsHTML = tags.map(tag => `<span class="tag">${tag.trim()}</span>`).join('');
+      tagsContainer.innerHTML = tagsHTML;
+      
+      // Add visual feedback for tag update
+      tagsContainer.style.transition = 'all 0.3s ease';
+      tagsContainer.style.backgroundColor = '#e8f5e8';
+      setTimeout(() => {
+        tagsContainer.style.backgroundColor = '';
+      }, 2000);
+      
+      console.log(`🏷️ Updated ${tags.length} tags for item ${updatedItem.id}`);
+    }
+
+    // If actions were stored, reload recommended actions to pick up any new ones
+    if (updateData.actionsStored) {
+      console.log(`🎯 Reloading actions for item ${updatedItem.id}`);
+      this.loadRecommendedActions(updatedItem.id);
+    }
+
+    // Add unified indicator if applicable
+    if (updateData.unified) {
+      const header = existingElement.querySelector('.clipboard-item-header');
+      if (header && !header.querySelector('.unified-indicator')) {
+        const indicator = document.createElement('span');
+        indicator.className = 'unified-indicator';
+        indicator.innerHTML = '<i class="fas fa-magic" title="Processed with unified AI analysis"></i>';
+        indicator.style.color = '#28a745';
+        indicator.style.marginLeft = '8px';
+        header.appendChild(indicator);
+      }
+    }
+  }
+
   copyItemDirect(itemId) {
-    const item = this.currentItems.find(i => i.id === itemId);
+    const item = this.filteredItems.find(i => i.id === itemId);
     if (item) {
       ipcRenderer.invoke('copy-to-clipboard', item.content);
       this.showToast('Copied to clipboard', 'success');
@@ -1150,12 +1398,15 @@ class FlowClipRenderer {
     const statusClass = session.status === 'active' ? 'status-active' : 
                        session.status === 'expired' ? 'status-expired' : 'status-completed';
 
+    // Generate focused session title and preview
+    const sessionInfo = this.generateSessionTitleAndPreview(session);
+
     return `
       <div class="session-item" data-session-id="${session.id}">
         <div class="session-header">
           <div class="session-title">
             <i class="fas fa-${this.getSessionTypeIcon(session.session_type)}"></i>
-            <span class="session-label">${session.session_label || 'Unnamed Session'}</span>
+            <span class="session-label">${sessionInfo.title}</span>
             <span class="session-type-badge ${session.session_type}">${this.formatSessionType(session.session_type)}</span>
           </div>
           <div class="session-status">
@@ -1167,34 +1418,260 @@ class FlowClipRenderer {
             <span><i class="fas fa-clipboard-list"></i> ${session.item_count} items</span>
             <span><i class="fas fa-clock"></i> ${duration}</span>
             <span><i class="fas fa-calendar"></i> ${timeAgo}</span>
+            ${sessionInfo.metrics ? `<span><i class="fas fa-chart-bar"></i> ${sessionInfo.metrics}</span>` : ''}
           </div>
         </div>
         <div class="session-preview">
-          ${this.createSessionPreview(session)}
+          ${this.createSessionPreview(session, sessionInfo)}
         </div>
       </div>
     `;
   }
 
-  createSessionPreview(session) {
-    // Try to parse context summary for preview
-    let contextSummary = '';
+  generateSessionTitleAndPreview(session) {
+    let title = session.session_label || `${this.formatSessionType(session.session_type)} Session`;
+    let preview = `${session.session_type.replace('_', ' ')} session with ${session.item_count} items`;
+    let metrics = null;
+
+    try {
+      // Try to parse context summary for enhanced title/preview
+      if (session.context_summary) {
+        const contextSummary = typeof session.context_summary === 'string' ? 
+          JSON.parse(session.context_summary) : session.context_summary;
+        
+        // Enhanced title from session research
+        if (contextSummary.sessionResearch) {
+          const research = contextSummary.sessionResearch;
+          
+          if (research.researchObjective) {
+            title = research.researchObjective;
+          } else if (research.comprehensiveSummary) {
+            // Generate title from comprehensive summary
+            title = this.generateConciseSessionTitle(session.session_type, research);
+          }
+          
+          // Enhanced preview from research data
+          if (research.comprehensiveSummary) {
+            preview = this.truncateText(research.comprehensiveSummary, 150);
+          } else if (research.keyFindings && research.keyFindings.length > 0) {
+            preview = `Key findings: ${research.keyFindings.slice(0, 2).join(', ')}`;
+          }
+          
+          // Metrics from research
+          if (research.researchData) {
+            const sources = research.researchData.totalSources || 0;
+            const findings = (research.keyFindings || []).length;
+            const confidence = Math.round((research.researchData.confidence || 0) * 100);
+            
+            if (sources > 0 || findings > 0) {
+              metrics = `${confidence}% confidence`;
+              if (sources > 0) metrics += `, ${sources} sources`;
+              if (findings > 0) metrics += `, ${findings} findings`;
+            }
+          }
+        }
+        
+        // Fallback to comprehensive analysis if available
+        else if (contextSummary.comprehensiveAnalysis) {
+          const analysis = contextSummary.comprehensiveAnalysis;
+          if (analysis.sessionSummary) {
+            preview = analysis.sessionSummary;
+          }
+          
+          // Metrics from comprehensive analysis
+          if (analysis.totalSources || analysis.totalItems) {
+            const items = analysis.totalItems || session.item_count;
+            const sources = analysis.totalSources || 0;
+            metrics = `${items} items`;
+            if (sources > 0) metrics += `, ${sources} sources`;
+          }
+        }
+        
+        // Fallback to session summary if available
+        else if (contextSummary.sessionSummary) {
+          preview = contextSummary.sessionSummary;
+        }
+      }
+      
+      // Try to parse intent analysis for additional context
+      if (session.intent_analysis && !metrics) {
+        const intentData = typeof session.intent_analysis === 'string' ? 
+          JSON.parse(session.intent_analysis) : session.intent_analysis;
+        
+        if (intentData.sessionIntent) {
+          const intent = intentData.sessionIntent;
+          if (intent.primaryGoal && !title.includes(intent.primaryGoal.substring(0, 20))) {
+            title = intent.primaryGoal;
+          }
+          
+          if (intent.completionStatus) {
+            metrics = this.formatCompletionStatus(intent.completionStatus);
+          }
+        } else if (intentData.primaryIntent) {
+          if (!title.includes(intentData.primaryIntent.substring(0, 20))) {
+            title = intentData.primaryIntent;
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error parsing session data for title/preview:', error);
+      // Fallback to basic information
+      title = session.session_label || `${this.formatSessionType(session.session_type)} Session`;
+      preview = `${session.session_type.replace('_', ' ')} session with ${session.item_count} items`;
+      metrics = null;
+    }
+    
+    return {
+      title: this.escapeHtml(title),
+      preview: this.escapeHtml(preview),
+      metrics: metrics ? this.escapeHtml(metrics) : null
+    };
+  }
+
+  generateConciseSessionTitle(sessionType, research) {
+    const researchObjective = research.researchObjective || '';
+    const keyFindings = research.keyFindings || [];
+    
+    // Extract key information from research objective
+    const locationMatch = researchObjective.match(/\b(Toronto|Montreal|Vancouver|New York|Los Angeles|Chicago|Boston|Austin|Miami|Seattle|Portland|Denver|Las Vegas|London|Paris|Tokyo|Sydney)\b/i);
+    const brandsMatch = researchObjective.match(/\b(Hilton|Marriott|Hyatt|Sheraton|Ritz|Four Seasons|Shangri|Apple|Samsung|Google|Microsoft|Amazon|Sony|Nike)\b/gi);
+    const cuisineMatch = researchObjective.match(/\b(Italian|French|Japanese|Chinese|Mexican|Thai|Indian|Mediterranean|Steakhouse)\b/i);
+    const productMatch = researchObjective.match(/\b(laptop|phone|headphones|camera|watch|tablet|computer|software|app)\b/i);
+    
+    let conciseTitle = '';
+    
+    switch (sessionType) {
+      case 'hotel_research':
+        if (locationMatch && brandsMatch && brandsMatch.length > 0) {
+          if (brandsMatch.length > 1) {
+            conciseTitle = `${brandsMatch.slice(0, 2).join(' vs ')} - ${locationMatch[0]}`;
+          } else {
+            conciseTitle = `${brandsMatch[0]} Hotels - ${locationMatch[0]}`;
+          }
+        } else if (locationMatch) {
+          conciseTitle = `Hotels in ${locationMatch[0]}`;
+        } else if (brandsMatch && brandsMatch.length > 0) {
+          if (brandsMatch.length > 1) {
+            conciseTitle = `${brandsMatch.slice(0, 2).join(' vs ')} Hotels`;
+          } else {
+            conciseTitle = `${brandsMatch[0]} Hotels`;
+          }
+        } else {
+          conciseTitle = 'Hotel Research';
+        }
+        break;
+        
+      case 'restaurant_research':
+        if (locationMatch && cuisineMatch) {
+          conciseTitle = `${cuisineMatch[0]} Restaurants - ${locationMatch[0]}`;
+        } else if (locationMatch) {
+          conciseTitle = `Restaurants in ${locationMatch[0]}`;
+        } else if (cuisineMatch) {
+          conciseTitle = `${cuisineMatch[0]} Restaurants`;
+        } else {
+          conciseTitle = 'Restaurant Research';
+        }
+        break;
+        
+      case 'travel_research':
+      case 'travel_planning':
+        if (locationMatch) {
+          conciseTitle = `Travel to ${locationMatch[0]}`;
+        } else {
+          conciseTitle = 'Travel Planning';
+        }
+        break;
+        
+      case 'product_research':
+        if (brandsMatch && brandsMatch.length > 1) {
+          conciseTitle = `${brandsMatch.slice(0, 2).join(' vs ')} Comparison`;
+        } else if (brandsMatch && brandsMatch.length > 0) {
+          conciseTitle = `${brandsMatch[0]} Products`;
+        } else if (productMatch) {
+          conciseTitle = `${productMatch[0].charAt(0).toUpperCase() + productMatch[0].slice(1)} Research`;
+        } else {
+          conciseTitle = 'Product Research';
+        }
+        break;
+        
+      case 'academic_research':
+        // Extract first few meaningful words from research objective
+        const academicTerms = researchObjective.match(/\b[A-Z][a-z]+(?:\s+[a-z]+){0,1}\b/g)?.slice(0, 2) || [];
+        if (academicTerms.length > 0) {
+          conciseTitle = `Academic: ${academicTerms.join(' & ')}`;
+        } else {
+          conciseTitle = 'Academic Research';
+        }
+        break;
+        
+      case 'event_planning':
+        if (locationMatch) {
+          conciseTitle = `Event Planning - ${locationMatch[0]}`;
+        } else {
+          conciseTitle = 'Event Planning';
+        }
+        break;
+        
+      default:
+        // Use first key finding if it's concise
+        if (keyFindings.length > 0 && keyFindings[0].length < 40) {
+          conciseTitle = keyFindings[0];
+        } else {
+          // Extract key terms from research objective
+          const keyTerms = researchObjective.match(/\b[A-Z][a-z]+(?:\s+[a-z]+){0,1}\b/g)?.slice(0, 2) || [];
+          if (keyTerms.length > 0) {
+            conciseTitle = `Research: ${keyTerms.join(' & ')}`;
+          } else {
+            conciseTitle = sessionType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+          }
+        }
+    }
+    
+    // Clean up title and ensure it's not too long
+    conciseTitle = conciseTitle.replace(/^(Research\s+|Find\s+|Get\s+)/i, '');
+    
+    if (conciseTitle.length > 50) {
+      conciseTitle = conciseTitle.substring(0, 47) + '...';
+    }
+    
+    return conciseTitle || 'Research Session';
+    }
+
+  createSessionPreview(session, sessionInfo = null) {
+    // Use the generated session info if provided
+    if (sessionInfo && sessionInfo.preview) {
+      return `<p class="session-summary">${this.truncateText(sessionInfo.preview, 150)}</p>`;
+    }
+    
+    // Fallback preview generation
+    let preview = '';
+    
     try {
       if (session.context_summary) {
-        const summary = typeof session.context_summary === 'string' ? 
+        const contextSummary = typeof session.context_summary === 'string' ? 
           JSON.parse(session.context_summary) : session.context_summary;
-        contextSummary = summary.toString().substring(0, 150) + '...';
+        
+        // Extract meaningful text from different parts of the context summary
+        if (contextSummary.sessionResearch && contextSummary.sessionResearch.comprehensiveSummary) {
+          preview = contextSummary.sessionResearch.comprehensiveSummary;
+        } else if (contextSummary.sessionSummary) {
+          preview = contextSummary.sessionSummary;
+        } else if (contextSummary.comprehensiveAnalysis) {
+          const analysis = contextSummary.comprehensiveAnalysis;
+          preview = `${analysis.totalItems} items analyzed across ${analysis.contentTypes.length} content types with ${analysis.totalSources} sources`;
+        }
       }
     } catch (error) {
-      contextSummary = session.context_summary ? 
-        session.context_summary.substring(0, 150) + '...' : '';
+      console.error('Error parsing context summary for preview:', error);
     }
 
-    if (!contextSummary) {
-      contextSummary = `${session.session_type.replace('_', ' ')} session with ${session.item_count} items`;
+    // Final fallback
+    if (!preview) {
+      preview = `${session.session_type.replace('_', ' ')} session with ${session.item_count} items`;
     }
 
-    return `<p class="session-summary">${contextSummary}</p>`;
+    return `<p class="session-summary">${this.truncateText(preview, 150)}</p>`;
   }
 
   getSessionTypeIcon(sessionType) {
@@ -1272,6 +1749,7 @@ class FlowClipRenderer {
         return;
       }
 
+      this.currentModalSessionId = sessionId;
       this.showSessionModal(session, sessionItems);
     } catch (error) {
       console.error('Error loading session details:', error);
@@ -1320,51 +1798,205 @@ class FlowClipRenderer {
     const container = document.getElementById('session-intent-analysis');
     
     let intentData = null;
+    let sessionResearch = null;
+    
     try {
       if (session.intent_analysis) {
         intentData = typeof session.intent_analysis === 'string' ? 
           JSON.parse(session.intent_analysis) : session.intent_analysis;
       }
+      
+      if (session.context_summary) {
+        const contextSummary = typeof session.context_summary === 'string' ?
+          JSON.parse(session.context_summary) : session.context_summary;
+        sessionResearch = contextSummary.sessionResearch;
+      }
     } catch (error) {
-      console.error('Error parsing intent analysis:', error);
+      console.error('Error parsing session analysis data:', error);
+      // Set to null to trigger fallback rendering
+      intentData = null;
+      sessionResearch = null;
     }
 
-    if (!intentData) {
+    // Check if we have session research results
+    if (sessionResearch && sessionResearch.researchCompleted) {
+      try {
+        const researchData = sessionResearch.researchData || {};
+        const keyFindings = sessionResearch.keyFindings || [];
+        const sources = researchData.sources || [];
+        const confidence = researchData.confidence || 0;
+        const totalSources = researchData.totalSources || sources.length || 0;
+        const searchQueries = researchData.searchQueries || [];
+        
+        container.innerHTML = `
+          <div class="session-research-results">
+            <!-- Research Confidence Score - Prominently displayed -->
+            <div class="research-confidence-banner">
+              <div class="confidence-score">
+                <div class="confidence-circle">
+                  <div class="confidence-percentage">${Math.round(confidence * 100)}%</div>
+                  <div class="confidence-label">Research Confidence</div>
+                </div>
+                <div class="confidence-details">
+                  <div class="confidence-metric">
+                    <strong>${totalSources}</strong> Sources
+                  </div>
+                  <div class="confidence-metric">
+                    <strong>${keyFindings.length}</strong> Key Findings
+                  </div>
+                  <div class="confidence-metric">
+                    <strong>${searchQueries.length}</strong> Research Queries
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Primary Intent and Research Objective -->
+            <div class="research-intent-section">
+              <h5><i class="fas fa-bullseye"></i> Research Intent & Objective</h5>
+              <div class="intent-primary">${(intentData?.sessionIntent?.primaryGoal) || sessionResearch.researchObjective || 'General research session'}</div>
+              ${(intentData?.sessionIntent?.completionStatus) ? `
+                <div class="completion-status">
+                  <span class="status-badge ${intentData.sessionIntent.completionStatus}">${this.formatCompletionStatus(intentData.sessionIntent.completionStatus)}</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Comprehensive Summary -->
+            <div class="research-summary-section">
+              <h5><i class="fas fa-file-alt"></i> Research Summary</h5>
+              <div class="research-summary-content">
+                ${sessionResearch.comprehensiveSummary || 'No comprehensive summary available'}
+              </div>
+            </div>
+
+            <!-- Key Findings -->
+            ${keyFindings.length > 0 ? `
+              <div class="research-findings-section">
+                <h5><i class="fas fa-lightbulb"></i> Key Findings</h5>
+                <ul class="key-findings-list">
+                  ${keyFindings.map(finding => `<li>${this.escapeHtml(finding)}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+
+            <!-- Research Data & Sources -->
+            ${sources.length > 0 ? `
+              <div class="research-sources-section">
+                <h5><i class="fas fa-link"></i> Research Sources (${totalSources})</h5>
+                <div class="sources-grid">
+                  ${sources.slice(0, 6).map(source => `
+                    <div class="source-card">
+                      <div class="source-title">${this.escapeHtml(source.title || source.source || 'Source')}</div>
+                      ${source.url ? `<div class="source-url"><a href="${this.escapeHtml(source.url)}" target="_blank">${this.truncateText(source.url, 40)}</a></div>` : ''}
+                      ${source.snippet ? `<div class="source-snippet">${this.escapeHtml(this.truncateText(source.snippet, 80))}</div>` : ''}
+                    </div>
+                  `).join('')}
+                  ${sources.length > 6 ? `
+                    <div class="source-card source-more">
+                      <i class="fas fa-plus"></i>
+                      <span>+${sources.length - 6} more sources</span>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Session Insights -->
+            ${sessionResearch.sessionInsights ? `
+              <div class="research-insights-section">
+                <h5><i class="fas fa-chart-pie"></i> Session Insights</h5>
+                <div class="insights-grid">
+                  <div class="insight-card">
+                    <div class="insight-label">Information Coverage</div>
+                    <div class="insight-value">${this.escapeHtml(sessionResearch.sessionInsights.informationCoverage || 'Unknown')}</div>
+                  </div>
+                  <div class="insight-card">
+                    <div class="insight-label">Research Depth</div>
+                    <div class="insight-value">${this.escapeHtml(sessionResearch.sessionInsights.researchDepth || 'Unknown')}</div>
+                  </div>
+                  <div class="insight-card">
+                    <div class="insight-label">Thematic Coherence</div>
+                    <div class="insight-value">${this.escapeHtml(sessionResearch.sessionInsights.thematicCoherence || 'Unknown')}</div>
+                  </div>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Next Steps -->
+            ${(intentData?.sessionIntent?.nextSteps && Array.isArray(intentData.sessionIntent.nextSteps) && intentData.sessionIntent.nextSteps.length > 0) ? `
+              <div class="research-next-steps">
+                <h5><i class="fas fa-arrow-right"></i> Recommended Next Steps</h5>
+                <div class="next-steps-list">
+                  ${intentData.sessionIntent.nextSteps.map(step => `
+                    <div class="next-step-item">
+                      <i class="fas fa-chevron-right"></i>
+                      <span>${this.escapeHtml(step)}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Research Metadata -->
+            <div class="research-metadata">
+              <div class="metadata-item">
+                <i class="fas fa-clock"></i>
+                <span>Last researched: ${sessionResearch.lastResearched ? this.formatTimeAgo(new Date(sessionResearch.lastResearched)) : 'Recently'}</span>
+              </div>
+              <div class="metadata-item">
+                <i class="fas fa-cog"></i>
+                <span>Research type: ${this.escapeHtml(sessionResearch.researchType || 'comprehensive')}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (renderError) {
+        console.error('Error rendering session research results:', renderError);
+        // Fallback to basic display
       container.innerHTML = `
         <div class="analysis-placeholder">
-          <i class="fas fa-brain"></i>
-          <p>Intent analysis will appear here as the session develops</p>
+            <i class="fas fa-exclamation-triangle text-warning"></i>
+            <p>Session research data is available but could not be displayed</p>
+            <small>Research results are being processed - please refresh in a moment</small>
         </div>
       `;
-      return;
-    }
+      }
+    } else if (intentData) {
+      try {
+        // Fallback to basic intent analysis if no session research available
+        const primaryIntent = intentData.primaryIntent || intentData.sessionIntent?.primaryGoal || 'Unknown';
+        const secondaryIntents = intentData.secondaryIntents || [];
+        const progressStatus = intentData.progressStatus || intentData.sessionIntent?.completionStatus || 'unknown';
+        const nextActions = intentData.nextLikelyActions || intentData.sessionIntent?.nextSteps || [];
+        const confidenceLevel = intentData.confidenceLevel || intentData.sessionIntent?.confidenceLevel || 0;
 
     container.innerHTML = `
       <div class="intent-analysis">
         <div class="intent-item">
           <strong>Primary Intent:</strong>
-          <span class="intent-primary">${intentData.primaryIntent || 'Unknown'}</span>
+              <span class="intent-primary">${this.escapeHtml(primaryIntent)}</span>
         </div>
-        ${intentData.secondaryIntents ? `
+            ${secondaryIntents.length > 0 ? `
           <div class="intent-item">
             <strong>Secondary Intents:</strong>
             <div class="intent-tags">
-              ${intentData.secondaryIntents.map(intent => 
-                `<span class="intent-tag">${intent}</span>`
+                  ${secondaryIntents.map(intent => 
+                    `<span class="intent-tag">${this.escapeHtml(intent)}</span>`
               ).join('')}
             </div>
           </div>
         ` : ''}
         <div class="intent-item">
           <strong>Progress Status:</strong>
-          <span class="progress-status ${intentData.progressStatus || 'unknown'}">${this.formatProgressStatus(intentData.progressStatus)}</span>
+              <span class="progress-status ${progressStatus}">${this.formatProgressStatus(progressStatus)}</span>
         </div>
-        ${intentData.nextLikelyActions ? `
+            ${nextActions.length > 0 ? `
           <div class="intent-item">
             <strong>Next Likely Actions:</strong>
             <div class="next-actions">
-              ${intentData.nextLikelyActions.map(action => 
-                `<span class="next-action">${action}</span>`
+                  ${nextActions.map(action => 
+                    `<span class="next-action">${this.escapeHtml(action)}</span>`
               ).join('')}
             </div>
           </div>
@@ -1372,17 +2004,52 @@ class FlowClipRenderer {
         <div class="intent-confidence">
           <strong>Confidence:</strong>
           <div class="confidence-bar">
-            <div class="confidence-fill" style="width: ${(intentData.confidenceLevel || 0) * 100}%"></div>
+                <div class="confidence-fill" style="width: ${confidenceLevel * 100}%"></div>
           </div>
-          <span>${Math.round((intentData.confidenceLevel || 0) * 100)}%</span>
+              <span>${Math.round(confidenceLevel * 100)}%</span>
         </div>
+
       </div>
     `;
+      } catch (intentRenderError) {
+        console.error('Error rendering intent analysis:', intentRenderError);
+        // Fallback for intent analysis errors
+        container.innerHTML = `
+          <div class="analysis-placeholder">
+            <i class="fas fa-exclamation-triangle text-warning"></i>
+            <p>Intent analysis data could not be displayed</p>
+            <small>Analysis is being processed - please refresh in a moment</small>
+      </div>
+    `;
+      }
+    } else {
+      container.innerHTML = `
+        <div class="analysis-placeholder">
+          <i class="fas fa-brain"></i>
+          <p>Session research will appear here as the session develops</p>
+          <small>Research is automatically triggered when 2+ items are added to a session</small>
+        </div>
+      `;
+    }
+  }
+
+  formatCompletionStatus(status) {
+    const statusMap = {
+      'comprehensive': 'Comprehensive Research Complete',
+      'substantial': 'Substantial Research Complete', 
+      'adequate': 'Adequate Research Complete',
+      'preliminary': 'Preliminary Research',
+      'in_progress': 'Research In Progress',
+      'completed': 'Completed',
+      'active': 'Active'
+    };
+    return statusMap[status] || this.formatProgressStatus(status);
   }
 
   renderResearchFlow(session, sessionItems) {
     const container = document.getElementById('session-research-flow');
     
+    try {
     if (!sessionItems || sessionItems.length === 0) {
       container.innerHTML = `
         <div class="analysis-placeholder">
@@ -1393,10 +2060,12 @@ class FlowClipRenderer {
       return;
     }
 
-    // Create timeline of session items
+      // Create timeline of session items with error handling
     const timeline = sessionItems.map((item, index) => {
+        try {
       const timeAgo = this.formatTimeAgo(new Date(item.timestamp));
-      const contentPreview = this.truncateText(item.content, 80);
+          const contentPreview = this.truncateText(item.content || '', 80);
+          const sourceApp = this.escapeHtml(item.source_app || 'Unknown');
       
       return `
         <div class="timeline-item">
@@ -1404,12 +2073,27 @@ class FlowClipRenderer {
           <div class="timeline-content">
             <div class="timeline-header">
               <span class="timeline-time">${timeAgo}</span>
-              <span class="timeline-source">${item.source_app || 'Unknown'}</span>
+                  <span class="timeline-source">${sourceApp}</span>
             </div>
-            <div class="timeline-text">${contentPreview}</div>
+                <div class="timeline-text">${this.escapeHtml(contentPreview)}</div>
           </div>
         </div>
       `;
+        } catch (itemError) {
+          console.error('Error rendering timeline item:', itemError);
+          return `
+            <div class="timeline-item">
+              <div class="timeline-marker">${index + 1}</div>
+              <div class="timeline-content">
+                <div class="timeline-header">
+                  <span class="timeline-time">Recently</span>
+                  <span class="timeline-source">Unknown</span>
+                </div>
+                <div class="timeline-text">Content unavailable</div>
+              </div>
+            </div>
+          `;
+        }
     }).join('');
 
     container.innerHTML = `
@@ -1417,6 +2101,16 @@ class FlowClipRenderer {
         ${timeline}
       </div>
     `;
+    } catch (error) {
+      console.error('Error rendering research flow:', error);
+      container.innerHTML = `
+        <div class="analysis-placeholder">
+          <i class="fas fa-exclamation-triangle text-warning"></i>
+          <p>Research flow data could not be displayed</p>
+          <small>Timeline is being processed - please refresh in a moment</small>
+      </div>
+    `;
+    }
   }
 
   renderHotelResearchData(session, sessionItems) {
@@ -1547,6 +2241,7 @@ class FlowClipRenderer {
   closeSessionModal() {
     document.getElementById('session-modal').style.display = 'none';
     this.currentSession = null;
+    this.currentModalSessionId = null;
   }
 
   async exportCurrentSession() {
@@ -1590,9 +2285,150 @@ class FlowClipRenderer {
   handleSessionUpdated(data) {
     console.log('Session updated:', data);
     
+    // If we're viewing this session and a new item was added, refresh the modal content
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      console.log('Session updated with new item, refreshing modal content...');
+      this.refreshSessionModalContent(data.sessionId);
+    }
+    
     // Refresh sessions view if currently visible
     if (this.currentView === 'sessions') {
       this.loadSessionsView();
+    }
+  }
+
+  // Session research event handlers
+  handleSessionResearchCompleted(data) {
+    console.log('Session-level research completed:', data);
+    
+    // Show success notification with session research summary
+    const message = `Session research completed with ${data.researchResults.researchData.totalSources} sources and comprehensive analysis`;
+    this.showToast(message, 'success');
+    
+    // If we're viewing this session, refresh the session modal content to show research results
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      console.log('Refreshing session modal with session research results...');
+      this.refreshSessionModalContent(data.sessionId);
+    }
+    
+    // Always refresh the sessions list to show updated session summaries
+    if (this.currentView === 'sessions') {
+      console.log('Refreshing sessions view with session research results...');
+      this.loadSessionsView();
+    }
+  }
+
+  handleSessionResearchFailed(data) {
+    console.log('Session-level research failed:', data);
+    
+    // Show error notification
+    this.showToast(`Session research failed: ${data.error}`, 'error');
+    
+    // If we're viewing this session, refresh the session modal content
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      this.refreshSessionModalContent(data.sessionId);
+    }
+    
+    // Remove any loading indicators
+    this.hideSessionResearchLoading();
+  }
+
+  handleSessionAnalysisUpdated(data) {
+    console.log('Session comprehensive analysis updated:', data);
+    
+    // Show success notification with research summary
+    const message = `Session enriched with ${data.analysisData.totalResearchFindings} research findings and ${data.analysisData.totalSources} sources`;
+    this.showToast(message, 'success');
+    
+    // If we're viewing this session, refresh the session modal content to show updated analysis
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      console.log('Refreshing session modal with updated comprehensive analysis...');
+      this.refreshSessionModalContent(data.sessionId);
+    }
+    
+    // Always refresh the sessions list to show updated session summaries
+    if (this.currentView === 'sessions') {
+      console.log('Refreshing sessions view with updated analysis...');
+      this.loadSessionsView();
+    }
+  }
+
+  // New method to refresh just the session modal content without full reload
+  async refreshSessionModalContent(sessionId) {
+    try {
+      // Show loading indicator in the modal
+      this.showSessionResearchLoading();
+      
+      // Get updated session and items data
+      const session = await ipcRenderer.invoke('get-session', sessionId);
+      const sessionItems = await ipcRenderer.invoke('get-session-items', sessionId);
+      
+      if (!session) {
+        console.error('Session not found during refresh');
+        return;
+      }
+
+      // Update session overview data
+      document.getElementById('session-duration').textContent = this.formatDuration(session.start_time, session.last_activity);
+      document.getElementById('session-item-count').textContent = `${sessionItems.length} items`;
+
+      // Re-render the intent analysis section with new research data
+      this.renderIntentAnalysis(session);
+
+      // Re-render research flow
+      this.renderResearchFlow(session, sessionItems);
+
+      // Re-render hotel research data if applicable
+      if (session.session_type === 'hotel_research') {
+        this.renderHotelResearchData(session, sessionItems);
+      }
+
+      // Re-render session items
+      this.renderSessionItems(sessionItems);
+
+      // Update current session reference
+      this.currentSession = session;
+
+      // Hide loading indicator
+      this.hideSessionResearchLoading();
+      
+      console.log('Session modal content refreshed successfully');
+      
+    } catch (error) {
+      console.error('Error refreshing session modal content:', error);
+      this.hideSessionResearchLoading();
+      this.showToast('Error updating session display', 'error');
+    }
+  }
+
+  // Show loading indicator for session research
+  showSessionResearchLoading() {
+    const container = document.getElementById('session-intent-analysis');
+    if (container) {
+      // Add loading overlay to the research section
+      const existingLoader = container.querySelector('.research-loading-overlay');
+      if (!existingLoader) {
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.className = 'research-loading-overlay';
+        loadingOverlay.innerHTML = `
+          <div class="research-loading-content">
+            <div class="loading-spinner"></div>
+            <p>Analyzing session research...</p>
+          </div>
+        `;
+        container.appendChild(loadingOverlay);
+      }
+    }
+  }
+
+  // Hide loading indicator for session research
+  hideSessionResearchLoading() {
+    const container = document.getElementById('session-intent-analysis');
+    if (container) {
+      const loadingOverlay = container.querySelector('.research-loading-overlay');
+      if (loadingOverlay) {
+        loadingOverlay.remove();
+      }
     }
   }
 
@@ -1640,6 +2476,246 @@ class FlowClipRenderer {
 
   showBookingOptions() {
     this.showToast('Booking integration coming soon!', 'info');
+  }
+
+  // Session research actions
+  async performSessionResearch(sessionId) {
+    try {
+      console.log(`Performing session research for session ${sessionId}...`);
+      
+      // Show loading indicator immediately if we're viewing this session
+      if (this.currentView === 'sessions' && this.currentModalSessionId === sessionId) {
+        this.showSessionResearchLoading();
+      }
+      
+      // Show loading notification
+      this.showToast('Starting comprehensive session research...', 'info');
+      
+      const result = await ipcRenderer.invoke('perform-session-research', sessionId);
+      
+      if (result.success) {
+        console.log('Session research completed successfully:', result.result);
+        // Success notification will be handled by the event handler
+      } else {
+        console.error('Session research failed:', result.error);
+        this.showToast(`Session research failed: ${result.error}`, 'error');
+        // Hide loading indicator on failure
+        if (this.currentView === 'sessions' && this.currentModalSessionId === sessionId) {
+          this.hideSessionResearchLoading();
+        }
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('Error performing session research:', error);
+      this.showToast(`Session research error: ${error.message}`, 'error');
+      // Hide loading indicator on error
+      if (this.currentView === 'sessions' && this.currentModalSessionId === sessionId) {
+        this.hideSessionResearchLoading();
+      }
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Session item research event handlers (for individual items in sessions)
+  handleSessionItemResearchCompleted(data) {
+    console.log('Session item research completed:', data);
+    
+    // Show success notification
+    this.showToast('Item research completed in session', 'success');
+    
+    // If we're viewing this session, refresh the modal content
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      console.log('Refreshing session modal with item research results...');
+      this.refreshSessionModalContent(data.sessionId);
+    }
+    
+    // Refresh sessions list
+    if (this.currentView === 'sessions') {
+      this.loadSessionsView();
+    }
+  }
+
+  handleSessionItemResearchFailed(data) {
+    console.log('Session item research failed:', data);
+    
+    // Show error notification
+    this.showToast(`Item research failed: ${data.error}`, 'error');
+  }
+
+  handleSessionResearchStarted(data) {
+    console.log('Session research started:', data);
+    
+    // Show notification that research has started
+    this.showToast('Session research has started', 'info');
+    
+    // If we're viewing this session, show loading indicator
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      console.log('Showing loading indicator for session research...');
+      this.showSessionResearchLoading();
+    }
+  }
+
+  handleSessionResearchProgress(data) {
+    console.log('Session research progress:', data);
+    
+    // Show progress notification for major phase changes
+    if (data.phase === 'queries_generated') {
+      this.showToast(`Generated ${data.totalQueries} research queries`, 'info');
+    } else if (data.phase === 'consolidating') {
+      this.showToast('Consolidating research results...', 'info');
+    } else if (data.phase === 'completed') {
+      this.showToast(`Research completed: ${data.finalResults.keyFindings} findings from ${data.finalResults.totalSources} sources`, 'success');
+    }
+    
+    // If we're viewing this session, update the progress display
+    if (this.currentView === 'sessions' && this.currentModalSessionId === data.sessionId) {
+      this.updateSessionResearchProgress(data);
+    }
+    
+    // Always refresh the sessions list to show updated progress
+    if (this.currentView === 'sessions') {
+      // Debounce the refresh to avoid too many updates
+      clearTimeout(this.sessionListRefreshTimeout);
+      this.sessionListRefreshTimeout = setTimeout(() => {
+        this.loadSessionsView();
+      }, 1000);
+    }
+  }
+
+  updateSessionResearchProgress(data) {
+    // Update or create progress display in the session modal
+    let progressContainer = document.getElementById('session-research-progress');
+    
+    if (!progressContainer) {
+      // Create progress container if it doesn't exist
+      const intentAnalysisContainer = document.getElementById('session-intent-analysis');
+      if (intentAnalysisContainer) {
+        progressContainer = document.createElement('div');
+        progressContainer.id = 'session-research-progress';
+        progressContainer.className = 'research-progress-container';
+        intentAnalysisContainer.insertBefore(progressContainer, intentAnalysisContainer.firstChild);
+      } else {
+        return; // Can't find where to insert progress
+      }
+    }
+    
+    // Show/hide based on research phase
+    if (data.phase === 'completed') {
+      // Hide progress after a delay to show completion
+      setTimeout(() => {
+        if (progressContainer) {
+          progressContainer.style.display = 'none';
+        }
+      }, 3000);
+    } else {
+      progressContainer.style.display = 'block';
+    }
+    
+    // Build progress HTML based on phase
+    let progressHTML = '';
+    
+    if (data.phase === 'initializing') {
+      progressHTML = `
+        <div class="research-progress-header">
+          <div class="progress-icon">
+            <i class="fas fa-search fa-spin"></i>
+          </div>
+          <div class="progress-info">
+            <div class="progress-title">Initializing Session Research</div>
+            <div class="progress-subtitle">Analyzing session content...</div>
+          </div>
+        </div>
+      `;
+    } else if (data.phase === 'queries_generated') {
+      progressHTML = `
+        <div class="research-progress-header">
+          <div class="progress-icon">
+            <i class="fas fa-list-check"></i>
+          </div>
+          <div class="progress-info">
+            <div class="progress-title">Research Queries Generated</div>
+            <div class="progress-subtitle">${data.totalQueries} queries ready for ${data.entriesWithQueries} entries</div>
+          </div>
+        </div>
+      `;
+    } else if (data.phase === 'searching') {
+      progressHTML = `
+        <div class="research-progress-header">
+          <div class="progress-icon">
+            <i class="fas fa-globe fa-spin"></i>
+          </div>
+          <div class="progress-info">
+            <div class="progress-title">Web Research in Progress</div>
+            <div class="progress-subtitle">${data.completedQueries}/${data.totalQueries} queries completed</div>
+          </div>
+        </div>
+        <div class="research-progress-bar">
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" style="width: ${data.progress}%"></div>
+            <div class="progress-bar-text">${data.progress}%</div>
+          </div>
+        </div>
+        <div class="research-current-status">
+          <div class="current-status-label">Current Search:</div>
+          <div class="current-status-text">${this.escapeHtml(data.currentQuery)}</div>
+          ${data.currentQuery ? `
+            <div class="current-query-details">
+              <div class="query-aspect"><strong>Aspect:</strong> ${this.escapeHtml(data.currentAspect || 'General')}</div>
+              <div class="query-text"><strong></strong> ${this.escapeHtml(data.langGraphStatus)}</div>
+            </div>
+          ` : ''}
+          ${data.findingsCount !== undefined ? `
+            <div class="findings-summary">
+              <i class="fas fa-lightbulb"></i>
+              ${data.findingsCount} finding${data.findingsCount !== 1 ? 's' : ''} discovered
+            </div>
+          ` : ''}
+        </div>
+      `;
+    } else if (data.phase === 'consolidating') {
+      progressHTML = `
+        <div class="research-progress-header">
+          <div class="progress-icon">
+            <i class="fas fa-puzzle-piece fa-spin"></i>
+          </div>
+          <div class="progress-info">
+            <div class="progress-title">Consolidating Research Results</div>
+            <div class="progress-subtitle">Processing ${data.researchResultsCount} research results</div>
+          </div>
+        </div>
+        <div class="research-progress-bar">
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" style="width: ${data.progress}%"></div>
+            <div class="progress-bar-text">${data.progress}%</div>
+          </div>
+        </div>
+        <div class="research-current-status">
+          <div class="current-status-text">${this.escapeHtml(data.currentStatus)}</div>
+        </div>
+      `;
+    } else if (data.phase === 'completed') {
+      progressHTML = `
+        <div class="research-progress-header">
+          <div class="progress-icon success">
+            <i class="fas fa-check-circle"></i>
+          </div>
+          <div class="progress-info">
+            <div class="progress-title">Research Completed Successfully</div>
+            <div class="progress-subtitle">${data.finalResults.keyFindings} findings • ${data.finalResults.totalSources} sources • ${data.finalResults.researchQuality} quality</div>
+          </div>
+        </div>
+        <div class="research-progress-bar">
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill success" style="width: 100%"></div>
+            <div class="progress-bar-text">Complete</div>
+          </div>
+        </div>
+      `;
+    }
+    
+    progressContainer.innerHTML = progressHTML;
   }
 }
 

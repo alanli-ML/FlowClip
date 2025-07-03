@@ -10,7 +10,8 @@
     "dev:renderer": "vite",
     "build": "vite build && electron-builder",
     "build:mac": "electron-builder --mac",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild": "electron-rebuild"
   },
   "keywords": [
     "clipboard",

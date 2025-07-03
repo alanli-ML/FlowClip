@@ -5,10 +5,10 @@ const Store = require('electron-store');
 const LangGraphClient = require('./langGraphClient');
 
 class AIService {
-  constructor() {
+  constructor(database) {
     this.openai = null;
     this.langGraphClient = null;
-    this.database = null;
+    this.database = database;
     this.store = new Store();
     this.useLangGraph = process.env.USE_LANGGRAPH !== 'false'; // Default to true for Phase 2
     this.initializeOpenAI();
@@ -23,17 +23,24 @@ class AIService {
       });
       // Set environment variable for LangGraph
       process.env.OPENAI_API_KEY = apiKey;
-      this.initializeLangGraph();
+      // Initialize LangGraph asynchronously
+      this.initializeLangGraph().catch(error => {
+        console.error('Failed to initialize LangGraph during OpenAI setup:', error);
+      });
     }
   }
 
-  initializeLangGraph() {
+  async initializeLangGraph() {
     const apiKey = this.store.get('openaiApiKey');
     if (apiKey && this.useLangGraph) {
       try {
         // Set environment variable for LangGraph
         process.env.OPENAI_API_KEY = apiKey;
         this.langGraphClient = new LangGraphClient();
+        
+        // Initialize the LangGraph client
+        await this.langGraphClient.init();
+        
         console.log('LangGraph client initialized successfully');
       } catch (error) {
         console.error('Failed to initialize LangGraph client:', error);
@@ -45,8 +52,13 @@ class AIService {
   setApiKey(apiKey) {
     this.store.set('openaiApiKey', apiKey);
     this.initializeOpenAI();
-    this.initializeLangGraph();
-    console.log(`AIService: Reinitialized with new API key. OpenAI: ${this.openai ? 'Ready' : 'Failed'}, LangGraph: ${this.langGraphClient ? 'Ready' : 'Failed'}`);
+    // Initialize LangGraph asynchronously
+    this.initializeLangGraph().then(() => {
+      console.log(`AIService: Reinitialized with new API key. OpenAI: ${this.openai ? 'Ready' : 'Failed'}, LangGraph: ${this.langGraphClient ? 'Ready' : 'Failed'}`);
+    }).catch(error => {
+      console.error('Failed to initialize LangGraph during API key setup:', error);
+      console.log(`AIService: Reinitialized with new API key. OpenAI: ${this.openai ? 'Ready' : 'Failed'}, LangGraph: Failed`);
+    });
   }
 
   isConfigured() {
@@ -62,146 +74,67 @@ class AIService {
   }
 
   async analyzeClipboardItem(clipboardItem) {
-    if (!this.isConfigured()) {
-      console.log('AI service not configured, skipping AI analysis');
-      return;
-    }
-
-    try {
-      if (this.useLangGraph && this.langGraphClient) {
-        // Use LangGraph workflow for comprehensive analysis
-        await this.analyzewithLangGraph(clipboardItem);
-      } else {
-        // Fallback to legacy analysis
-        this.generateTags(clipboardItem);
-        this.detectContentType(clipboardItem);
-        this.suggestActions(clipboardItem);
-      }
-    } catch (error) {
-      console.error('Error in AI analysis:', error);
-      // Fallback to legacy if LangGraph fails
-      if (this.useLangGraph && this.openai) {
-        console.log('Falling back to legacy OpenAI analysis...');
-        this.generateTags(clipboardItem);
-        this.detectContentType(clipboardItem);
-        this.suggestActions(clipboardItem);
-      }
-    }
-  }
-
-  async analyzewithLangGraph(clipboardItem) {
-    console.log('LangGraph: Starting comprehensive analysis...');
+    console.log('AI Service: Starting analysis for clipboard item:', clipboardItem.id);
     
     try {
-      // Initialize database if needed
-      if (!this.database) {
-        this.database = new Database();
-        await this.database.init();
-      }
-
-      // Prepare data for LangGraph workflow
       const workflowData = {
         content: clipboardItem.content,
         context: {
           sourceApp: clipboardItem.source_app,
           windowTitle: clipboardItem.window_title,
           surroundingText: clipboardItem.surrounding_text,
-          timestamp: clipboardItem.timestamp
+          timestamp: clipboardItem.timestamp,
+          screenshotPath: clipboardItem.screenshot_path
         }
       };
 
-      // Execute content analysis workflow
-      const analysisResult = await this.langGraphClient.executeWorkflow('content_analysis', workflowData);
-      
-      console.log('LangGraph: Content analysis completed', analysisResult);
+      // Use unified comprehensive analysis instead of separate workflows
+      const comprehensiveResult = await this.langGraphClient.executeWorkflow('comprehensive_content_analysis', workflowData);
+      console.log('LangGraph: Comprehensive analysis completed', comprehensiveResult);
 
-      // Save analysis results to database
-      if (analysisResult.tags && analysisResult.tags.length > 0) {
-        await this.database.addTags(clipboardItem.id, analysisResult.tags);
-      }
+      // Transform result to match expected format
+      const analysisResult = {
+        type: comprehensiveResult.contentType,
+        category: comprehensiveResult.purpose,
+        sentiment: comprehensiveResult.sentiment,
+        confidence: comprehensiveResult.confidence / 100,
+        language: 'unknown', // LangGraph doesn't detect language yet
+        insights: comprehensiveResult.contextInsights,
+        tags: comprehensiveResult.tags || [],
+        recommendedActions: comprehensiveResult.recommendedActions || [],
+        actionConfidence: comprehensiveResult.actionConfidence || 0.7,
+        actionReasons: comprehensiveResult.actionReasons || {},
+        visualContext: comprehensiveResult.visualContext,
+        hasVisualContext: comprehensiveResult.hasVisualContext,
+        analysisMethod: 'comprehensive'
+      };
 
-      // Create AI task record for content analysis
-      const analysisTaskId = uuidv4();
-      await this.database.saveAITask({
-        id: analysisTaskId,
-        clipboard_item_id: clipboardItem.id,
-        task_type: 'langgraph_content_analysis',
-        status: 'completed',
-        result: JSON.stringify(analysisResult),
-        error: null
-      });
-
-      // Execute tagging workflow for enhanced tagging
-      try {
-        const taggingResult = await this.langGraphClient.executeWorkflow('tagging', workflowData);
-        console.log('LangGraph: Tagging workflow completed', taggingResult);
-        
-        if (taggingResult.finalTags && taggingResult.finalTags.length > 0) {
-          // Merge with existing tags (avoid duplicates)
-          const existingTags = analysisResult.tags || [];
-          const allTags = [...new Set([...existingTags, ...taggingResult.finalTags])];
-          await this.database.addTags(clipboardItem.id, allTags);
-        }
-
-        // Save tagging task
-        const taggingTaskId = uuidv4();
+      // Save unified analysis task
+      const taskId = uuidv4();
         await this.database.saveAITask({
-          id: taggingTaskId,
+        id: taskId,
           clipboard_item_id: clipboardItem.id,
-          task_type: 'langgraph_tagging',
+        task_type: 'comprehensive_analysis',
           status: 'completed',
-          result: JSON.stringify(taggingResult),
-          error: null
-        });
-      } catch (taggingError) {
-        console.error('LangGraph: Tagging workflow failed:', taggingError);
-      }
-
-      // Execute action recommendation workflow with enhanced context
-      try {
-        const enhancedWorkflowData = {
-          ...workflowData,
-          context: {
-            ...workflowData.context,
-            screenshotPath: clipboardItem.screenshot_path,
-            sourceApp: clipboardItem.source_app,
-            windowTitle: clipboardItem.window_title
-          }
-        };
-
-        const actionResult = await this.langGraphClient.executeWorkflow('action_recommendation', enhancedWorkflowData);
-        console.log('LangGraph: Action recommendation completed', actionResult);
-
-        // Save action recommendation task
-        const actionTaskId = uuidv4();
-        await this.database.saveAITask({
-          id: actionTaskId,
-          clipboard_item_id: clipboardItem.id,
-          task_type: 'langgraph_action_recommendation',
-          status: 'completed',
-          result: JSON.stringify(actionResult),
+        result: JSON.stringify(comprehensiveResult),
           error: null
         });
 
-        // Add recommended actions to the analysis result
-        analysisResult.recommendedActions = actionResult.recommendedActions;
-        analysisResult.actionConfidence = actionResult.confidence;
-        analysisResult.actionReasons = actionResult.actionReasons;
-
-      } catch (actionError) {
-        console.error('LangGraph: Action recommendation workflow failed:', actionError);
+      // Update clipboard item with tags if available
+      if (comprehensiveResult.tags && comprehensiveResult.tags.length > 0) {
+        await this.database.addTags(clipboardItem.id, comprehensiveResult.tags);
       }
 
       return analysisResult;
     } catch (error) {
-      console.error('LangGraph: Analysis failed:', error);
+      console.error('LangGraph: Comprehensive analysis failed:', error);
       
       // Save failed task
       const failedTaskId = uuidv4();
       await this.database.saveAITask({
         id: failedTaskId,
         clipboard_item_id: clipboardItem.id,
-        task_type: 'langgraph_analysis',
+        task_type: 'comprehensive_analysis',
         status: 'failed',
         result: null,
         error: error.message
@@ -229,6 +162,18 @@ class AIService {
       switch (taskType) {
         case 'summarize':
           result = await this.langGraphClient.executeWorkflow('summarization', workflowData);
+          
+          // Merge summarization results back into comprehensive analysis
+          if (result && clipboardItem.id) {
+            console.log('AIService: Merging summarization results into comprehensive analysis...');
+            try {
+              await this.database.mergeWorkflowResults(clipboardItem.id, 'summarize', result);
+              console.log('AIService: Successfully merged summarization results into comprehensive analysis');
+            } catch (mergeError) {
+              console.error('AIService: Error merging summarization results:', mergeError);
+            }
+          }
+          
           // Transform LangGraph result to match expected format
           result = {
             summary: result.finalSummary || result.summary,
@@ -240,7 +185,51 @@ class AIService {
           break;
           
         case 'research':
-          result = await this.langGraphClient.executeWorkflow('research', workflowData);
+          console.log('AIService: Executing research workflow...');
+          console.log('AIService: Clipboard item ID:', clipboardItem.id);
+          
+          // Ensure comprehensive analysis is available before research
+          let existingAnalysis = null;
+          try {
+            console.log('AIService: Checking for existing comprehensive analysis...');
+            const existingItem = await this.database.getClipboardItem(clipboardItem.id);
+            console.log('AIService: Retrieved item from database:', !!existingItem);
+            
+            if (existingItem && existingItem.analysis_data) {
+              console.log('AIService: Found existing analysis_data');
+              console.log('AIService: Analysis data length:', existingItem.analysis_data.length);
+              existingAnalysis = JSON.parse(existingItem.analysis_data);
+              console.log('AIService: Parsed existing analysis successfully');
+              console.log('AIService: Analysis content type:', existingAnalysis.contentType);
+              console.log('AIService: Analysis has visual context:', existingAnalysis.hasVisualContext);
+            } else {
+              console.log('AIService: No existing analysis_data found');
+            }
+          } catch (error) {
+            console.log('AIService: Error loading existing analysis:', error.message);
+          }
+          
+          // Enhance workflow data with existing analysis
+          const enhancedWorkflowData = {
+            ...workflowData,
+            existingAnalysis: existingAnalysis
+          };
+          
+          console.log('AIService: Enhanced workflow data keys:', Object.keys(enhancedWorkflowData));
+          console.log('AIService: Passing existingAnalysis to LangGraph:', !!enhancedWorkflowData.existingAnalysis);
+          
+          result = await this.langGraphClient.executeWorkflow('research', enhancedWorkflowData);
+          
+          // Merge research results back into comprehensive analysis
+          if (result && clipboardItem.id) {
+            console.log('AIService: Merging research results into comprehensive analysis...');
+            try {
+              await this.database.mergeWorkflowResults(clipboardItem.id, 'research', result);
+              console.log('AIService: Successfully merged research results into comprehensive analysis');
+            } catch (mergeError) {
+              console.error('AIService: Error merging research results:', mergeError);
+            }
+          }
           
           // Transform new LangGraph result structure to match expected UI format
           if (result.researchSummary) {
@@ -292,11 +281,6 @@ class AIService {
     };
 
     try {
-      // Save task to database
-      if (!this.database) {
-        this.database = new Database();
-        await this.database.init();
-      }
       await this.database.saveAITask(task);
 
       const prompt = `
@@ -361,10 +345,6 @@ class AIService {
     };
 
     try {
-      if (!this.database) {
-        this.database = new Database();
-        await this.database.init();
-      }
       await this.database.saveAITask(task);
 
       const prompt = `
@@ -426,10 +406,6 @@ class AIService {
     };
 
     try {
-      if (!this.database) {
-        this.database = new Database();
-        await this.database.init();
-      }
       await this.database.saveAITask(task);
 
       const prompt = `
@@ -494,11 +470,6 @@ class AIService {
     };
 
     try {
-      if (!this.database) {
-        this.database = new Database();
-        await this.database.init();
-      }
-
       // Get clipboard item
       const clipboardItem = await this.database.getClipboardItem(clipboardItemId);
       if (!clipboardItem) {
@@ -913,6 +884,24 @@ class AIService {
       .sort(([,a], [,b]) => b - a)
       .slice(0, 5)
       .map(([word]) => word);
+  }
+
+  /**
+   * Set progress callback for LangGraph workflows
+   */
+  setLangGraphProgressCallback(callback) {
+    if (this.langGraphClient) {
+      this.langGraphClient.setProgressCallback(callback);
+    }
+  }
+
+  /**
+   * Clear progress callback for LangGraph workflows  
+   */
+  clearLangGraphProgressCallback() {
+    if (this.langGraphClient) {
+      this.langGraphClient.clearProgressCallback();
+    }
   }
 }
 

@@ -128,7 +128,7 @@ For full functionality, add these API keys to your N8N workflows:
 - **Wikipedia**: No key needed (general information)
 
 ### Paid APIs (Enhanced Features)
-- **SerpAPI**: Google Search, Scholar ($50/month for 5K searches)
+- **OpenAI API**: Web search and AI processing (pay-per-use, more cost-effective)
 - **TripAdvisor**: Hotel reviews (contact for pricing)
 - **Amazon Product API**: Product search (revenue sharing)
 - **eBay API**: Product listings (free tier available)
