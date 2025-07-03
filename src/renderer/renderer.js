@@ -14,6 +14,7 @@ class FlowClipRenderer {
     this.currentPage = 1;
     this.itemsPerPage = 50;
     this.settings = {};
+    this.sessionListRefreshTimeout = null;
     
     // Initialize managers
     this.uiRenderer = new UIRenderer();
@@ -486,6 +487,14 @@ class FlowClipRenderer {
       this.uiRenderer.showToast('Consolidating research results...', 'info');
     } else if (data.phase === 'completed') {
       this.uiRenderer.showToast(`Research completed: ${data.finalResults.keyFindings} findings from ${data.finalResults.totalSources} sources`, 'success');
+      
+      // When research is completed via progress event, refresh the session modal to show final results
+      if (this.currentView === 'sessions' && this.sessionUIManager.getCurrentModalSessionId() === data.sessionId) {
+        console.log('Research completed - refreshing session modal with final results...');
+        setTimeout(() => {
+          this.sessionUIManager.refreshSessionModalContent(data.sessionId);
+        }, 1000); // Delay to ensure backend data is saved
+      }
     }
     
     if (this.currentView === 'sessions' && this.sessionUIManager.getCurrentModalSessionId() === data.sessionId) {
@@ -525,79 +534,7 @@ class FlowClipRenderer {
     this.sessionUIManager.showHotelResearchAlert(data);
   }
 
-  handleSessionResearchCompleted(data) {
-    console.log('Session-level research completed:', data);
-    
-    const message = `Session research completed with ${data.researchResults.researchData.totalSources} sources and comprehensive analysis`;
-    this.uiRenderer.showToast(message, 'success');
-    
-    if (this.currentView === 'sessions' && this.sessionUIManager.getCurrentModalSessionId() === data.sessionId) {
-      console.log('Refreshing session modal with session research results...');
-      this.sessionUIManager.refreshSessionModalContent(data.sessionId);
-    }
-    
-    if (this.currentView === 'sessions') {
-      console.log('Refreshing sessions view with session research results...');
-      this.sessionUIManager.loadSessionsView();
-    }
-  }
 
-  handleSessionResearchFailed(data) {
-    console.log('Session-level research failed:', data);
-    this.uiRenderer.showToast(`Session research failed: ${data.error}`, 'error');
-    
-    if (this.currentView === 'sessions' && this.sessionUIManager.getCurrentModalSessionId() === data.sessionId) {
-      this.sessionUIManager.refreshSessionModalContent(data.sessionId);
-    }
-  }
-
-  handleSessionResearchStarted(data) {
-    console.log('Session research started:', data);
-    this.uiRenderer.showToast('Session research has started', 'info');
-  }
-
-  handleSessionResearchProgress(data) {
-    console.log('Session research progress:', data);
-    
-    if (data.phase === 'queries_generated') {
-      this.uiRenderer.showToast(`Generated ${data.totalQueries} research queries`, 'info');
-    } else if (data.phase === 'consolidating') {
-      this.uiRenderer.showToast('Consolidating research results...', 'info');
-    } else if (data.phase === 'completed') {
-      this.uiRenderer.showToast(`Research completed: ${data.finalResults.keyFindings} findings from ${data.finalResults.totalSources} sources`, 'success');
-    }
-    
-    if (this.currentView === 'sessions') {
-      clearTimeout(this.sessionListRefreshTimeout);
-      this.sessionListRefreshTimeout = setTimeout(() => {
-        this.sessionUIManager.loadSessionsView();
-      }, 1000);
-    }
-  }
-
-  handleSessionItemResearchCompleted(data) {
-    console.log('Session item research completed:', data);
-    this.uiRenderer.showToast('Item research completed in session', 'success');
-    
-    if (this.currentView === 'sessions' && this.sessionUIManager.getCurrentModalSessionId() === data.sessionId) {
-      console.log('Refreshing session modal with item research results...');
-      this.sessionUIManager.refreshSessionModalContent(data.sessionId);
-    }
-    
-    if (this.currentView === 'sessions') {
-      this.sessionUIManager.loadSessionsView();
-    }
-  }
-
-  handleSessionItemResearchFailed(data) {
-    console.log('Session item research failed:', data);
-    this.uiRenderer.showToast(`Item research failed: ${data.error}`, 'error');
-  }
-
-  showHotelResearchAlert(data) {
-    const { sessionId, message, recommendation, hotels, location } = data;
-    this.uiRenderer.showToast('Hotel research session detected - check details!', 'info');
-  }
 
   // Exposed methods for global access
   triggerActionFromButton(itemId, action) {
