@@ -131,6 +131,341 @@ npm start
 
 FlowClip uses an optimized AI workflow system built on LangGraph that dramatically reduces API calls while providing richer insights. The system has been streamlined from 9 individual workflows to 7 comprehensive workflows with recent major enhancements for session research and real-time progress tracking.
 
+### System Architecture Overview
+
+The following diagram illustrates the complete data flow and component interactions in FlowClip's AI-powered clipboard management system:
+
+```mermaid
+graph TD
+    %% Main Application Components
+    A[Clipboard Monitoring] --> B[Context Capture]
+    B --> C[Clipboard Item Creation]
+    C --> D[LangGraph: Comprehensive Content Analysis]
+    
+    %% LangGraph Workflows
+    subgraph LangGraph["LangGraph AI Workflows"]
+        D1[comprehensive_content_analysis<br/>- Content Classification<br/>- Context Analysis<br/>- Tagging<br/>- Action Recommendations]
+        D2[summarization<br/>- Key Point Extraction<br/>- Context Integration<br/>- Quality Summary]
+        D3[research<br/>- Query Generation<br/>- Web Search<br/>- Results Processing]
+        D4[session_management<br/>- Session Type Detection<br/>- Membership Evaluation<br/>- Intent Analysis]
+        D5[session_research_consolidation<br/>- Unified Session Summary<br/>- Research Objective<br/>- Goals & Next Steps]
+        D6[research_query_generation<br/>- Intelligent Query Creation<br/>- Content-Aware Queries]
+        D7[hotel_research<br/>- Specialized Hotel Research<br/>- Booking Integration]
+    end
+    
+    %% Primary Flow
+    D --> D1
+    D1 --> E[Session Analysis]
+    E --> F[Session Manager]
+    
+    %% Session Management Flow
+    subgraph SessionFlow["Session Management"]
+        F1[Find Session Candidates<br/>- Active Sessions<br/>- Inactive Sessions<br/>- Time Window]
+        F2[Evaluate Membership<br/>- LangGraph Analysis<br/>- Pattern Matching<br/>- Theme Detection]
+        F3[Create/Join Session<br/>- Standalone → Inactive<br/>- Second Item → Active]
+        F4[Session Intent Analysis<br/>- Primary Intent<br/>- Progress Status<br/>- Content Themes]
+    end
+    
+    F --> F1
+    F1 --> F2
+    F2 --> F3
+    F3 --> F4
+    
+    %% Session Research Flow
+    F4 --> G[Session Research Engine]
+    
+    subgraph ResearchFlow["Session Research Process"]
+        G1[Query Generation<br/>- LangGraph: research_query_generation<br/>- Content-Aware Queries]
+        G2[Web Research<br/>- Individual Search Terms<br/>- Real-time Progress<br/>- Result Aggregation]
+        G3[Research Consolidation<br/>- ConsolidatedSessionSummarizer<br/>- LangGraph: session_research_consolidation]
+    end
+    
+    G --> G1
+    G1 --> G2
+    G2 --> G3
+    
+    %% Data Storage
+    subgraph Database["SQLite Database"]
+        H1[clipboard_items<br/>- Content<br/>- Analysis Data<br/>- Tags & Actions]
+        H2[clipboard_sessions<br/>- Session Type<br/>- Status<br/>- Research Results]
+        H3[session_members<br/>- Session-Item Mapping<br/>- Sequence Order]
+    end
+    
+    D1 --> H1
+    F3 --> H2
+    F3 --> H3
+    G3 --> H2
+    
+    %% Real-time Progress System
+    subgraph ProgressSystem["Real-time Progress Updates"]
+        I1[SessionManager Progress<br/>- initializing<br/>- queries_generated<br/>- searching<br/>- consolidating]
+        I2[LangGraph Progress<br/>- Individual Search Terms<br/>- Progress Callbacks<br/>- Results Count]
+        I3[UI Progress Display<br/>- Progress Bars<br/>- Status Text<br/>- Current Operations]
+    end
+    
+    G2 --> I1
+    G2 --> I2
+    I1 --> I3
+    I2 --> I3
+    
+    %% UI Components
+    subgraph UI["User Interface"]
+        J1[Main Window<br/>- Clipboard History<br/>- Session View<br/>- Research Results]
+        J2[Overlay<br/>- Quick Actions<br/>- Paste Assistant]
+        J3[Tray Menu<br/>- Monitoring Toggle<br/>- Permission Status]
+        J4[Progress Indicators<br/>- Real-time Updates<br/>- Research Status]
+    end
+    
+    H1 --> J1
+    H2 --> J1
+    I3 --> J4
+    
+    %% External Services
+    subgraph External["External Services"]
+        K1[OpenAI API<br/>- GPT-4 Vision<br/>- GPT-3.5 Turbo<br/>- Content Analysis]
+        K2[Web Search<br/>- Search Results<br/>- Content Extraction]
+        K3[N8N Workflows<br/>- Hotel Research<br/>- Automation<br/>- External APIs]
+    end
+    
+    D1 --> K1
+    D2 --> K1
+    D4 --> K1
+    D5 --> K1
+    D6 --> K1
+    G2 --> K2
+    G --> K3
+    
+    %% Event System
+    subgraph Events["Event System"]
+        L1[Workflow Events<br/>- workflow-started<br/>- workflow-completed<br/>- workflow-failed]
+        L2[Session Events<br/>- session-created<br/>- session-updated<br/>- session-research-progress]
+        L3[Progress Events<br/>- session-research-progress<br/>- Individual search updates]
+    end
+    
+    D --> L1
+    F --> L2
+    G --> L3
+    L1 --> J1
+    L2 --> J1
+    L3 --> J4
+    
+    %% Data Flow Legend
+    subgraph Legend["Data Flow Types"]
+        M1[Primary Data Flow] 
+        M2[Real-time Updates]
+        M3[Database Operations]
+        M4[API Calls]
+        M5[Event Notifications]
+    end
+    
+    %% Styling
+    classDef workflow fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef database fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef external fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef ui fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef progress fill:#fff8e1,stroke:#f57c00,stroke-width:2px
+    
+    class D1,D2,D3,D4,D5,D6,D7 workflow
+    class H1,H2,H3 database
+    class K1,K2,K3 external
+    class J1,J2,J3,J4 ui
+    class I1,I2,I3 progress
+```
+
+**Key Architecture Components:**
+
+1. **📋 Clipboard Monitoring**: Captures every copy operation with full context including source application, window title, and optional screenshots
+2. **🤖 LangGraph Processing**: Seven specialized AI workflows handle different aspects of content analysis and session management
+3. **🔄 Session Intelligence**: Automatic grouping of related clipboard items with intelligent membership evaluation and theme detection
+4. **📊 Real-time Progress**: Live updates showing individual web searches and research progress with dual-level status tracking
+5. **💾 Local Storage**: SQLite database with three main tables for clipboard items, sessions, and membership relationships
+6. **🎯 Event-Driven Architecture**: Comprehensive event system enabling real-time UI updates and workflow coordination
+
+### LangGraph Workflow Details
+
+The following diagram provides technical details about each LangGraph workflow, showing the internal node structure and data flow:
+
+```mermaid
+graph TD
+    %% LangGraph Workflow Details
+    subgraph LangGraphDetails["LangGraph Workflow Architecture"]
+        
+        %% Comprehensive Content Analysis
+        subgraph CCA["comprehensive_content_analysis"]
+            CCA1[Input: content, context, screenshot]
+            CCA2[comprehensive_analysis Node<br/>- Content Type Detection<br/>- Sentiment Analysis<br/>- Tag Generation<br/>- Action Recommendations]
+            CCA3[enhance_results Node<br/>- Quality Enhancement<br/>- Confidence Boost<br/>- Result Validation]
+            CCA4[Output: contentType, sentiment,<br/>tags, recommendedActions,<br/>visualContext, confidence]
+        end
+        
+        %% Summarization Workflow
+        subgraph SUM["summarization"]
+            SUM1[Input: content, context]
+            SUM2[extract_and_contextualize Node<br/>- Key Point Extraction<br/>- Context Integration<br/>- Contextual Summary]
+            SUM3[generate_quality_summary Node<br/>- Final Summary<br/>- Quality Validation<br/>- Refinement Check]
+            SUM4[refine_summary Node<br/>- Enhancement<br/>- Quality Improvement]
+            SUM5[Output: summary, keyPoints,<br/>qualityScore, finalSummary]
+        end
+        
+        %% Research Workflow
+        subgraph RES["research"]
+            RES1[Input: content, context, existingAnalysis]
+            RES2[generate_research_queries Node<br/>- Query Generation<br/>- Search Strategy<br/>- Context Analysis]
+            RES3[perform_web_research Node<br/>- Web Search Execution<br/>- Progress Callbacks<br/>- Result Extraction]
+            RES4[process_research_results Node<br/>- Result Processing<br/>- Summary Generation<br/>- Quality Assessment]
+            RES5[Output: researchQueries, searchResults,<br/>keyFindings, sources, confidence]
+        end
+        
+        %% Session Management
+        subgraph SM["session_management"]
+            SM1[Input: content, context, existingSession]
+            SM2[analyze_session_context Node<br/>- Session Type Detection<br/>- Intent Analysis<br/>- Context Evaluation]
+            SM3[evaluate_session_membership Node<br/>- Membership Assessment<br/>- Confidence Scoring<br/>- Reasoning Generation]
+            SM4[generate_session_decision Node<br/>- Decision Making<br/>- Action Planning<br/>- Quality Assessment]
+            SM5[Output: sessionType, belongsToSession,<br/>sessionDecision, intentAnalysis]
+        end
+        
+        %% Session Research Consolidation
+        subgraph SRC["session_research_consolidation"]
+            SRC1[Input: content, context,<br/>existingAnalysis.researchData]
+            SRC2[consolidate_session_research Node<br/>- Research Objective<br/>- Summary Generation<br/>- Goals & Next Steps<br/>- Primary Intent]
+            SRC3[Output: researchObjective, summary,<br/>primaryIntent, researchGoals, nextSteps]
+        end
+        
+        %% Research Query Generation
+        subgraph RQG["research_query_generation"]
+            RQG1[Input: content, context,<br/>entryAnalysis, sessionType]
+            RQG2[generate_research_queries Node<br/>- Intelligent Query Creation<br/>- Content Analysis<br/>- Context Integration]
+            RQG3[Output: researchQueries,<br/>queryCount, analysisMethod]
+        end
+        
+        %% Hotel Research
+        subgraph HR["hotel_research"]
+            HR1[Input: content, context, location]
+            HR2[analyze_hotel_requirements Node<br/>- Requirement Analysis<br/>- Preference Extraction<br/>- Criteria Definition]
+            HR3[generate_hotel_queries Node<br/>- Query Generation<br/>- Search Strategy<br/>- Filter Creation]
+            HR4[perform_hotel_research Node<br/>- Hotel Search<br/>- Availability Check<br/>- Price Comparison]
+            HR5[Output: hotelQueries, searchResults,<br/>recommendations, bookingOptions]
+        end
+    end
+    
+    %% Data Flow Between Workflows
+    CCA4 --> SM1
+    CCA4 --> SUM1
+    CCA4 --> RES1
+    CCA4 --> RQG1
+    SM5 --> RQG1
+    RQG3 --> RES1
+    RES5 --> SRC1
+    
+    %% Workflow Connections
+    CCA1 --> CCA2 --> CCA3 --> CCA4
+    SUM1 --> SUM2 --> SUM3 --> SUM4 --> SUM5
+    RES1 --> RES2 --> RES3 --> RES4 --> RES5
+    SM1 --> SM2 --> SM3 --> SM4 --> SM5
+    SRC1 --> SRC2 --> SRC3
+    RQG1 --> RQG2 --> RQG3
+    HR1 --> HR2 --> HR3 --> HR4 --> HR5
+    
+    %% Data Structures
+    subgraph DataStructures["Key Data Structures"]
+        
+        subgraph ClipboardItem["Clipboard Item"]
+            CI1[id: UUID<br/>content: string<br/>timestamp: datetime<br/>source_app: string<br/>window_title: string<br/>screenshot_path: string<br/>analysis_data: JSON]
+        end
+        
+        subgraph SessionData["Session Data"]
+            SD1[id: UUID<br/>session_type: string<br/>session_label: string<br/>status: active/inactive<br/>start_time: datetime<br/>last_activity: datetime<br/>context_summary: string<br/>intent_analysis: JSON]
+        end
+        
+        subgraph ResearchResults["Research Results"]
+            RR1[entryId: UUID<br/>aspect: string<br/>query: string<br/>key_findings: array<br/>research_summary: string<br/>sources: array<br/>confidence: number]
+        end
+        
+        subgraph ConsolidatedSummary["Consolidated Summary"]
+            CS1[sessionId: UUID<br/>researchObjective: string<br/>summary: string<br/>primaryIntent: string<br/>keyFindings: array<br/>researchGoals: array<br/>nextSteps: array<br/>entitiesResearched: array<br/>aspectsCovered: array<br/>sources: array<br/>confidenceLevel: number]
+        end
+    end
+    
+    %% Progress Flow
+    subgraph ProgressFlow["Real-time Progress System"]
+        P1[SessionManager Progress Events<br/>- initializing<br/>- queries_generated<br/>- searching<br/>- consolidating<br/>- completed]
+        P2[LangGraph Progress Callbacks<br/>- Individual search terms<br/>- Progress percentage<br/>- Current query status]
+        P3[UI Progress Display<br/>- Progress bars<br/>- Status text<br/>- Current operations<br/>- Completion indicators]
+    end
+    
+    RES3 --> P1
+    RES3 --> P2
+    P1 --> P3
+    P2 --> P3
+    
+    %% State Management
+    subgraph StateFlow["Workflow State Management"]
+        SF1[Initial State<br/>- Input Parameters<br/>- Context Data<br/>- Configuration]
+        SF2[Node Processing<br/>- State Transformation<br/>- AI Processing<br/>- Result Generation]
+        SF3[State Transition<br/>- Node Connections<br/>- Data Flow<br/>- Error Handling]
+        SF4[Final State<br/>- Output Results<br/>- Success/Failure<br/>- Metadata]
+    end
+    
+    SF1 --> SF2 --> SF3 --> SF4
+    
+    %% Performance Optimizations
+    subgraph Optimizations["Performance Optimizations"]
+        O1[Workflow Consolidation<br/>- 9 workflows → 7 workflows<br/>- Reduced API calls<br/>- Unified processing]
+        O2[API Call Reduction<br/>- 5 separate calls → 1 call<br/>- Batch processing<br/>- Shared context]
+        O3[Caching Strategy<br/>- Vision analysis cache<br/>- 2-minute cache lifetime<br/>- Duplicate prevention]
+        O4[Progress Optimization<br/>- Real-time updates<br/>- Non-blocking operations<br/>- User feedback]
+    end
+    
+    %% OpenAI Integration
+    subgraph OpenAI["OpenAI Integration"]
+        OAI1[GPT-4 Vision<br/>- Screenshot Analysis<br/>- Visual Context<br/>- Multimodal Processing]
+        OAI2[GPT-3.5 Turbo<br/>- Text Analysis<br/>- Summarization<br/>- Query Generation]
+        OAI3[Model Selection<br/>- Vision: GPT-4<br/>- Text: GPT-3.5<br/>- Temperature: 0.7]
+    end
+    
+    CCA2 --> OAI1
+    CCA2 --> OAI2
+    SUM2 --> OAI2
+    RES2 --> OAI2
+    SM2 --> OAI2
+    SRC2 --> OAI2
+    RQG2 --> OAI2
+    
+    %% Styling
+    classDef workflow fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef data fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef progress fill:#fff8e1,stroke:#f57c00,stroke-width:2px
+    classDef optimization fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef state fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef openai fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    
+    class CCA2,CCA3,SUM2,SUM3,SUM4,RES2,RES3,RES4,SM2,SM3,SM4,SRC2,RQG2,HR2,HR3,HR4 workflow
+    class CI1,SD1,RR1,CS1 data
+    class P1,P2,P3 progress
+    class O1,O2,O3,O4 optimization
+    class SF1,SF2,SF3,SF4 state
+    class OAI1,OAI2,OAI3 openai
+```
+
+**Technical Architecture Highlights:**
+
+1. **🔗 Workflow Interconnection**: Content analysis results feed into session management and research workflows, creating a unified intelligence pipeline
+
+2. **📊 State Management**: Each workflow maintains state through LangGraph's StateGraph system, enabling complex multi-step processing with error recovery
+
+3. **⚡ Performance Optimizations**: 
+   - **Workflow Consolidation**: 9 workflows → 7 workflows
+   - **API Efficiency**: 5 separate calls → 1 unified call (80% reduction)
+   - **Vision Caching**: 2-minute cache prevents duplicate screenshot analysis
+   - **Progress Optimization**: Real-time updates without blocking operations
+
+4. **🎯 Data Structures**: Well-defined schemas for clipboard items, sessions, research results, and consolidated summaries ensure data consistency
+
+5. **🚀 Real-time Progress**: Dual-level progress tracking shows both high-level workflow status and individual search operations
+
+6. **🧠 AI Integration**: Strategic use of GPT-4 Vision for visual context and GPT-3.5 Turbo for text processing, optimized for cost and performance
+
 #### Performance Optimization
 - **80% Reduction in Session Research API Calls**: From 5 separate calls to 1 unified call
 - **50% Reduction in Overall API Calls**: From ~25-30 to ~12-15 calls per clipboard item
@@ -206,6 +541,11 @@ Replaces hardcoded content-type checks with intelligent analysis:
 #### Recent Major Enhancements (Latest Release)
 
 ##### 🚀 Session Research Revolution
+- **Intelligent Entity Relationship Analysis**: Automatically detects relationships between researched entities
+- **Strategy-Aware Consolidation**: Uses different consolidation strategies based on entity relationships
+- **Comparison Analysis**: Side-by-side comparison for competing entities (Hotel A vs Hotel B)
+- **Merger Analysis**: Unified profiles when researching same entity from multiple angles
+- **Complementary Analysis**: Synergy identification for related entities (Hotel + Restaurant)
 - **Consolidated Session Summarizer**: Unified 5-in-1 analysis replacing separate API calls
 - **Real-Time Progress Tracking**: Live updates showing current web searches being performed
 - **Immediate Intent Recognition**: Intent analysis triggers when second item joins session
@@ -213,12 +553,15 @@ Replaces hardcoded content-type checks with intelligent analysis:
 - **Query Count Tracking**: Proper display of research queries executed
 
 ##### 🔄 Session Processing Improvements  
+- **Context-Aware Consolidation**: No more generic "list of findings" - intelligent strategy selection
+- **Entity Detection**: Automatic identification of hotels, restaurants, products, people, locations
+- **Decision Support**: Clear recommendations and comparison matrices for decision-making
 - **Post-Analysis Processing**: Session processing now waits for comprehensive analysis completion
 - **Immediate Standalone Sessions**: Items become sessions immediately, activated when second item joins
 - **Proper Field Mapping**: Fixed UI field mappings for summary, confidence, and research data
 - **Duplicate Session Prevention**: Eliminated issue where two sessions were created for consecutive items
 
-##### 📊 Real-Time Progress Display
+##### 📊 Enhanced Consolidation Strategies
 ```
 SessionManager Level (High-level overview):
 • "Current Search": Research query overview from SessionManager

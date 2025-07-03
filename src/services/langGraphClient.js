@@ -582,10 +582,10 @@ Key Points to Include: ${state.keyPoints.join(', ')}`)
       }
     });
 
-    // Step 1: Generate Smart Research Queries
+    // Step 1: Generate Smart Research Queries - MODIFIED to return single query per entity
     workflow.addNode("generate_research_queries", async (state) => {
       try {
-        console.log('LangGraph Research: Starting query generation...');
+        console.log('LangGraph Research: Starting single query generation...');
         console.log('LangGraph Research: State keys:', Object.keys(state));
         console.log('LangGraph Research: Has existingAnalysis?', !!state.existingAnalysis);
         
@@ -618,12 +618,12 @@ Key Points to Include: ${state.keyPoints.join(', ')}`)
         let searchHints = [];
         
         if (existingAnalysis) {
-          console.log('LangGraph Research: Using existing comprehensive analysis for enhanced query generation');
+          console.log('LangGraph Research: Using existing comprehensive analysis for enhanced single query generation');
           console.log('LangGraph Research: Analysis content type:', existingAnalysis.contentType);
           console.log('LangGraph Research: Analysis tags:', existingAnalysis.tags);
           console.log('LangGraph Research: Analysis has visual context:', existingAnalysis.hasVisualContext);
           
-          // Use analysis insights to improve search queries
+          // Use analysis insights to improve the single search query
           contextualInfo = `
 CONTENT ANALYSIS CONTEXT:
 - Content Type: ${existingAnalysis.contentType}
@@ -632,7 +632,7 @@ CONTENT ANALYSIS CONTEXT:
 - Tags: ${existingAnalysis.tags.join(', ')}
 - Key Insights: ${existingAnalysis.insights}
 
-This context should inform more targeted and relevant search queries.`;
+This context should inform a single, highly targeted and relevant search query.`;
 
           // Include previous workflow results if available
           if (existingAnalysis.workflowResults) {
@@ -666,13 +666,13 @@ This context should inform more targeted and relevant search queries.`;
             }
             
             contextualInfo += workflowContext;
-            contextualInfo += "\n\nUse this previous workflow context to generate more targeted research queries that build on or complement existing insights.";
+            contextualInfo += "\n\nUse this previous workflow context to generate one highly targeted research query that builds on or complements existing insights.";
       }
 
           // Include visual context if available
           if (existingAnalysis.hasVisualContext && existingAnalysis.visualContext) {
             const visualContext = existingAnalysis.visualContext;
-            console.log('LangGraph Research: Including visual context in queries');
+            console.log('LangGraph Research: Including visual context in single query');
             console.log('LangGraph Research: User activity:', visualContext.userActivity);
             console.log('LangGraph Research: Work context:', visualContext.workContext);
             
@@ -684,7 +684,7 @@ VISUAL CONTEXT FROM SCREENSHOT:
 - Urgency Level: ${visualContext.urgencyLevel || 'medium'}
 - Visual Cues: ${visualContext.visualCues || 'none'}
 
-Use this visual context to generate more relevant and targeted search queries.`;
+Use this visual context to generate the most relevant and targeted single search query.`;
 
             // Extract visual search hints
             if (visualContext.userActivity && visualContext.userActivity !== 'unknown') {
@@ -738,7 +738,7 @@ Use this visual context to generate more relevant and targeted search queries.`;
           searchHints = [...new Set(searchHints)].slice(0, 5);
           console.log('LangGraph Research: Generated search hints from analysis:', searchHints);
         } else {
-          console.log('LangGraph Research: No existing analysis found, proceeding with basic query generation');
+          console.log('LangGraph Research: No existing analysis found, proceeding with basic single query generation');
         }
 
         // Pre-process content to extract meaningful search terms if it's a URL
@@ -778,56 +778,77 @@ Use this visual context to generate more relevant and targeted search queries.`;
         }
         
         const messages = [
-          new SystemMessage(`Generate 3-5 specific, targeted search queries that would help find comprehensive information about the given topic.
+          new SystemMessage(`Generate ONE highly targeted, comprehensive search query that would help find the most relevant information about the given topic.
 
 ${contextualInfo}
 
-Create SHORT, FOCUSED search queries (2-5 words each) that would work well in search engines. 
+Create a SINGLE, FOCUSED search query (2-7 words) that would work optimally in search engines. 
 
 Guidelines:
-- Use the most important keywords from the content
-- Make queries specific and actionable
+- Generate only ONE query that captures the most important aspects
+- Use the most relevant keywords from the content and analysis
+- Make the query specific and actionable
 - Avoid generic terms like "information" or "guide" 
 - Do NOT include URLs or tracking parameters
-- Focus on the actual topic being researched
+- Focus on the core topic being researched
+- Combine the most important search terms into one comprehensive query
 ${searchHints.length > 0 ? `- Consider these contextual hints: ${searchHints.join(', ')}` : ''}
 
-Return only a JSON array of SHORT search query strings based exclusively on the provided content.`),
+Return a single search query string (not an array, just the query text).`),
           new HumanMessage(`Content to research: ${processedContent.trim()}
 
 ${existingAnalysis ? `Analysis Context: This content has been identified as ${existingAnalysis.contentType} with purpose "${existingAnalysis.purpose}" and tagged as: ${existingAnalysis.tags.join(', ')}
 
 ${existingAnalysis.hasVisualContext ? `Visual Context: User was engaged in ${existingAnalysis.visualContext?.userActivity || 'general activity'} within a ${existingAnalysis.visualContext?.workContext || 'general'} context. Visual analysis suggests ${existingAnalysis.visualContext?.urgencyLevel || 'medium'} priority level.` : 'No visual context available.'}` : ''}
 
-Generate search queries for this specific topic:`)
+Generate a single, comprehensive search query for this specific topic:`)
         ];
         
         const response = await this.llm.invoke(messages);
-        let researchQueries;
+        let researchQuery;
         
         try {
-          researchQueries = JSON.parse(response.content);
-          if (!Array.isArray(researchQueries)) {
-            throw new Error('Not an array');
+          // Expect a single string response, not JSON
+          researchQuery = response.content.trim();
+          
+          // Clean the query - remove quotes, extra whitespace, and any JSON artifacts
+          researchQuery = researchQuery.replace(/^["']|["']$/g, '').trim();
+          researchQuery = researchQuery.replace(/\n/g, ' ').replace(/\s+/g, ' ');
+          
+          // If it looks like JSON was returned accidentally, try to extract the query
+          if (researchQuery.startsWith('{') || researchQuery.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(researchQuery);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                researchQuery = parsed[0];
+              } else if (typeof parsed === 'object' && parsed.query) {
+                researchQuery = parsed.query;
+              }
+            } catch (e) {
+              // If JSON parsing fails, clean up the string
+              researchQuery = researchQuery.replace(/[{}\[\]"]/g, '').trim();
+            }
           }
           
-          // Clean and validate queries - remove any that are too long or contain URLs
-          researchQueries = researchQueries
-            .filter(query => typeof query === 'string' && query.length < 100 && !query.includes('http'))
-            .map(query => query.trim())
-            .slice(0, 5);
+          // Validate query length and content
+          if (!researchQuery || researchQuery.length < 3 || researchQuery.length > 100 || researchQuery.includes('http')) {
+            throw new Error('Invalid query generated');
+          }
             
         } catch (parseError) {
-          console.log('LangGraph Research: Failed to parse AI-generated queries, creating enhanced fallback');
+          console.log('LangGraph Research: Failed to parse AI-generated query, creating enhanced fallback');
           
           // Enhanced fallback using existing analysis if available
           if (existingAnalysis && existingAnalysis.tags.length > 0) {
-            // Use tags to create better fallback queries
+            // Use tags to create better fallback query
             const relevantTags = existingAnalysis.tags.filter(tag => 
               !['short-content', 'brief', 'long-content', 'detailed', 'ai-generated'].includes(tag)
             );
             
-            researchQueries = relevantTags.slice(0, 3);
+            // Combine content with most relevant tags
+            const contentWords = processedContent.trim().split(/\s+/).slice(0, 3);
+            const tagWords = relevantTags.slice(0, 2);
+            researchQuery = [...contentWords, ...tagWords].join(' ');
             
             // Add visual context terms if available
             if (existingAnalysis.hasVisualContext && existingAnalysis.visualContext) {
@@ -835,55 +856,37 @@ Generate search queries for this specific topic:`)
               
               // Add user activity as a search term if it's specific
               if (visualContext.userActivity && visualContext.userActivity !== 'unknown' && visualContext.userActivity !== 'general activity') {
-                researchQueries.push(visualContext.userActivity);
-              }
-              
-              // Add work context if it's specific
-              if (visualContext.workContext && visualContext.workContext !== 'unknown' && visualContext.workContext !== 'general') {
-                researchQueries.push(visualContext.workContext);
+                researchQuery += ` ${visualContext.userActivity}`;
               }
             }
-            
-            // Add content-based query if available
-            if (processedContent.trim()) {
-              const contentWords = processedContent.trim().split(/\s+/);
-              const mainTerms = contentWords.slice(0, 2).join(' ');
-              if (mainTerms && !researchQueries.includes(mainTerms)) {
-                researchQueries.push(mainTerms);
-              }
-            }
-            
-            // Remove duplicates and limit
-            researchQueries = [...new Set(researchQueries)].slice(0, 4);
           } else {
             // Basic fallback
           const contentWords = processedContent.trim().split(/\s+/);
-          const mainTerms = contentWords.slice(0, 3).join(' '); // Use first 3 words max
-          researchQueries = [mainTerms || state.content.substring(0, 50)];
+            researchQuery = contentWords.slice(0, 4).join(' '); // Use first 4 words max
           }
         }
         
-        // If content is a URL, include the URL itself as one of the search queries
+        // If content is a URL, use the URL itself as the query
         if (isUrl && originalUrl) {
-          console.log('LangGraph Research: Content is a URL, including URL in search queries');
-          // Add the URL at the beginning of the queries array
-          researchQueries.unshift(originalUrl);
-          // Ensure we don't exceed the limit
-          researchQueries = researchQueries.slice(0, 5);
+          console.log('LangGraph Research: Content is a URL, using URL as single search query');
+          researchQuery = originalUrl;
         }
         
-        console.log('LangGraph Research: Generated queries:', researchQueries);
+        // Ensure we have exactly one query
+        const finalQueries = [researchQuery];
+        
+        console.log('LangGraph Research: Generated single query:', researchQuery);
         console.log(`LangGraph Research: Used existing analysis: ${!!existingAnalysis}`);
         
         return {
           ...state,
-          researchQueries: researchQueries,
+          researchQueries: finalQueries,
           usedExistingAnalysis: !!existingAnalysis,
           analysisContext: existingAnalysis
         };
       } catch (error) {
         console.error('Query generation error:', error);
-        // Use only the actual content for fallback queries
+        // Use only the actual content for fallback query
         const contentWords = state.content.trim().split(/\s+/).slice(0, 5).join(' ');
         return {
           ...state,
@@ -1278,9 +1281,8 @@ For next steps, consider gathering additional sources to verify findings and exp
   }
 
   /**
-   * Session Management Workflow - Unified session handling
-   * Combines: Session Type Detection + Membership Evaluation + Session Analysis
-   * Reduces API calls from 6+ to 2-3
+   * Session Management Workflow - Enhanced with entity relationship analysis
+   * Handles session analysis, membership evaluation, and entity relationship analysis
    */
   async setupSessionManagementWorkflow() {
     const workflow = new StateGraph({
@@ -1288,211 +1290,514 @@ For next steps, consider gathering additional sources to verify findings and exp
         content: String,
         context: Object,
         existingSession: Object,
-        // Session type detection
+        // Session analysis results
         sessionType: String,
-        sessionConfidence: Number,
-        sessionReasoning: String,
-        // Membership evaluation
         belongsToSession: Boolean,
-        membershipConfidence: Number,
-        membershipReasoning: String,
-        // Session analysis
-        sessionInsights: String,
+        sessionDecision: Object,
+        sessionReasoning: String,
         intentAnalysis: Object,
-        nextActions: Array,
-        // Unified results
-        sessionDecision: Object
+        // Entity relationship analysis results
+        entityRelationships: Object,
+        membershipConfidence: Number
       }
     });
 
-    // Step 1: Comprehensive Session Analysis
     workflow.addNode("analyze_session_context", async (state) => {
       try {
-        const contextInfo = state.context || {};
-        let visualContext = "";
+        const context = state.context || {};
+        const analysisType = context.analysisType || 'session_membership';
         
-        // Use screenshot analysis for session type detection if available
-        if (contextInfo.screenshotPath && state.content) {
-          try {
-            const screenshotAnalysis = await this.analyzeScreenshot(
-              contextInfo.screenshotPath,
-              state.content,
-              `Analyze this screenshot to determine session type and user intent:
-
-Look for visual clues that indicate:
-- Hotel/accommodation research (booking sites, hotel listings, maps)
-- Restaurant research (menu sites, review sites, reservation platforms)
-- Product research (shopping sites, comparison tools, specifications)
-- Academic research (papers, articles, academic sources)
-- Travel research (destinations, itineraries, planning)
-- General research (search results, information gathering)
-
-Also assess the user's workflow and intent based on visual context.`
-            );
-            
-            if (screenshotAnalysis) {
-              visualContext = `Visual Analysis: ${screenshotAnalysis}\n\n`;
-            }
-          } catch (error) {
-            console.log('SessionManagement: Screenshot analysis failed, continuing without visual context');
-          }
+        // Handle different analysis types
+        if (analysisType === 'entity_relationship_analysis') {
+          return this.performEntityRelationshipAnalysis(state);
+        } else {
+          return this.performSessionMembershipAnalysis(state);
         }
+        
+          } catch (error) {
+        console.error('Session context analysis error:', error);
+        return this.getSessionAnalysisFallback(state);
+      }
+    });
 
-        // Comprehensive session analysis in one API call
+    workflow.addNode("evaluate_session_membership", async (state) => {
+      // This node is only used for traditional session membership evaluation
+      if (state.context?.analysisType === 'entity_relationship_analysis') {
+        // Skip membership evaluation for entity analysis
+        return state;
+      }
+      
+      try {
+        const context = state.context || {};
+        const existingSession = state.existingSession || {};
+        
         const messages = [
-          new SystemMessage(`Perform comprehensive session management analysis:
+          new SystemMessage(`Evaluate whether this clipboard item should join an existing session.
 
-${visualContext}
+Consider:
+1. Content similarity and thematic relevance
+2. Session type compatibility
+3. User intent alignment
+4. Temporal proximity and workflow continuity
 
-TASKS:
-1. SESSION TYPE DETECTION - Identify session type based on content and context
-2. MEMBERSHIP EVALUATION - If existing session provided, evaluate if content belongs
-3. SESSION INSIGHTS - Analyze user intent and workflow patterns
-
-Session Types: hotel_research, restaurant_research, product_research, academic_research, travel_research, general_research
-
-${state.existingSession ? 
-  `EXISTING SESSION:
-  Type: ${state.existingSession.type}
-  Label: ${state.existingSession.label}
-  Items: ${JSON.stringify(state.existingSession.items, null, 2)}` 
-  : 'No existing session to evaluate'}
-
-Return as JSON:
+Return JSON with:
 {
-  "sessionType": "detected_type",
-  "sessionConfidence": 0.0-1.0,
-  "sessionReasoning": "why this session type",
-  ${state.existingSession ? `"belongsToSession": boolean,
+  "belongsToSession": boolean,
   "membershipConfidence": 0.0-1.0,
-  "membershipReasoning": "why it belongs/doesn't belong",` : ''}
-  "intentAnalysis": {
-    "primaryIntent": "main goal",
-    "progressStatus": "just_started|in_progress|nearly_complete",
-    "nextLikelyActions": ["action1", "action2"]
-  },
-  "sessionInsights": "detailed analysis of user workflow and patterns"
+  "reasoning": "Detailed explanation of membership decision"
 }`),
           new HumanMessage(`Content: ${state.content}
 
-Source App: ${contextInfo.sourceApp || 'unknown'}
-Window Title: ${contextInfo.windowTitle || 'unknown'}
-Has Visual Context: ${!!visualContext}`)
+Source App: ${context.sourceApp || 'unknown'}
+Window Title: ${context.windowTitle || 'unknown'}
+
+Existing Session:
+- Type: ${existingSession.type || 'unknown'}
+- Label: ${existingSession.label || 'unknown'}
+- Items: ${existingSession.items?.length || 0} items
+
+Session Items Context: ${JSON.stringify(existingSession.items?.slice(0, 3) || [])}`)
         ];
         
         const response = await this.llm.invoke(messages);
-        let analysis;
+        let membershipResult;
         
         try {
-          analysis = JSON.parse(response.content);
+          membershipResult = JSON.parse(response.content);
         } catch (parseError) {
-          // Fallback analysis
-          analysis = {
-            sessionType: "general_research",
-            sessionConfidence: 0.5,
-            sessionReasoning: "Fallback classification due to parse error",
-            belongsToSession: state.existingSession ? false : undefined,
-            membershipConfidence: state.existingSession ? 0.3 : undefined,
-            membershipReasoning: state.existingSession ? "Analysis failed" : undefined,
-            intentAnalysis: {
-              primaryIntent: "research",
-              progressStatus: "in_progress",
-              nextLikelyActions: ["continue_research", "organize_findings"]
-            },
-            sessionInsights: "Basic session analysis completed with limited data"
+          membershipResult = {
+            belongsToSession: false,
+            membershipConfidence: 0.3,
+            reasoning: 'Analysis failed, defaulting to no membership'
           };
         }
         
         return {
           ...state,
-          sessionType: analysis.sessionType,
-          sessionConfidence: analysis.sessionConfidence || 0.5,
-          sessionReasoning: analysis.sessionReasoning || "No reasoning provided",
-          belongsToSession: analysis.belongsToSession,
-          membershipConfidence: analysis.membershipConfidence,
-          membershipReasoning: analysis.membershipReasoning,
-          intentAnalysis: analysis.intentAnalysis || {},
-          sessionInsights: analysis.sessionInsights || "Session analysis completed"
+          belongsToSession: membershipResult.belongsToSession || false,
+          membershipConfidence: membershipResult.membershipConfidence || 0.3,
+          sessionReasoning: membershipResult.reasoning || 'Membership evaluation completed'
         };
+
       } catch (error) {
-        console.error('Session analysis error:', error);
+        console.error('Session membership evaluation error:', error);
         return {
           ...state,
-          sessionType: "general_research",
-          sessionConfidence: 0.3,
-          sessionReasoning: "Error in analysis",
-          belongsToSession: state.existingSession ? false : undefined,
-          membershipConfidence: state.existingSession ? 0.2 : undefined,
-          membershipReasoning: state.existingSession ? "Analysis error" : undefined,
-          intentAnalysis: {
-            primaryIntent: "unknown",
-            progressStatus: "in_progress",
-            nextLikelyActions: ["retry_analysis"]
-          },
-          sessionInsights: "Session analysis failed"
+          belongsToSession: false,
+          membershipConfidence: 0.2,
+          sessionReasoning: 'Error in membership evaluation, defaulting to no membership'
         };
       }
     });
 
-    // Step 2: Generate Session Decision & Next Actions
     workflow.addNode("generate_session_decision", async (state) => {
+      // Skip decision generation for entity relationship analysis
+      if (state.context?.analysisType === 'entity_relationship_analysis') {
+        return state;
+      }
+      
       try {
-        // Create unified session decision without additional API call
-        const sessionDecision = {
-          // Session type results
-          detectedSessionType: state.sessionType,
-          sessionTypeConfidence: state.sessionConfidence,
-          
-          // Membership results (if applicable)
-          ...(state.existingSession && {
-            shouldJoinExistingSession: state.belongsToSession,
-            membershipConfidence: state.membershipConfidence,
-            membershipReason: state.membershipReasoning
-          }),
-          
-          // Session insights
-          userIntent: state.intentAnalysis.primaryIntent,
-          progressStatus: state.intentAnalysis.progressStatus,
-          recommendedActions: state.intentAnalysis.nextLikelyActions || [],
-          
-          // Metadata
-          analysisQuality: state.sessionConfidence > 0.7 ? 'high' : state.sessionConfidence > 0.4 ? 'medium' : 'low',
-          hasVisualContext: state.hasVisualContext || false,
-          timestamp: new Date().toISOString()
-        };
+        const context = state.context || {};
+        
+        const messages = [
+          new SystemMessage(`Generate session management decision and analysis.
+
+Based on the content and context, determine:
+1. Session type (if creating new session)
+2. User intent and purpose
+3. Progress status and next actions
+4. Session decision reasoning
+
+Return JSON with:
+{
+  "sessionDecision": {
+    "detectedSessionType": "hotel_research|restaurant_research|product_research|academic_research|general_research",
+    "userIntent": "Main user goal or intent",
+    "progressStatus": "initiated|in_progress|nearly_complete|completed",
+    "sessionTypeConfidence": 0.0-1.0,
+    "shouldCreateSession": boolean
+  },
+  "intentAnalysis": {
+    "primaryIntent": "Main research purpose",
+    "secondaryIntents": ["intent1", "intent2"],
+    "urgency": "low|medium|high",
+    "complexity": "simple|moderate|complex"
+  }
+}`),
+          new HumanMessage(`Content: ${state.content}
+
+Source App: ${context.sourceApp || 'unknown'}
+Window Title: ${context.windowTitle || 'unknown'}
+Screenshot Available: ${!!context.screenshotPath}
+
+Current Analysis Context: ${state.sessionReasoning || 'No previous analysis'}`)
+        ];
+
+        const response = await this.llm.invoke(messages);
+        let decisionResult;
+
+        try {
+          decisionResult = JSON.parse(response.content);
+        } catch (parseError) {
+          decisionResult = {
+            sessionDecision: {
+              detectedSessionType: 'general_research',
+              userIntent: 'Information gathering',
+              progressStatus: 'initiated',
+              sessionTypeConfidence: 0.5,
+              shouldCreateSession: true
+            },
+            intentAnalysis: {
+              primaryIntent: 'Research information',
+              secondaryIntents: [],
+              urgency: 'medium',
+              complexity: 'moderate'
+            }
+          };
+        }
         
         return {
           ...state,
-          sessionDecision: sessionDecision,
-          nextActions: state.intentAnalysis.nextLikelyActions || []
+          sessionDecision: decisionResult.sessionDecision,
+          intentAnalysis: decisionResult.intentAnalysis,
+          sessionType: decisionResult.sessionDecision?.detectedSessionType || 'general_research'
         };
+
       } catch (error) {
         console.error('Session decision generation error:', error);
         return {
           ...state,
           sessionDecision: {
-            detectedSessionType: state.sessionType || "general_research",
-            sessionTypeConfidence: 0.3,
-            analysisQuality: 'low',
-            error: 'Decision generation failed'
+            detectedSessionType: 'general_research',
+            userIntent: 'Information gathering',
+            progressStatus: 'initiated',
+            sessionTypeConfidence: 0.4,
+            shouldCreateSession: false
           },
-          nextActions: ["retry_analysis"]
+          intentAnalysis: {
+            primaryIntent: 'Research',
+            secondaryIntents: [],
+            urgency: 'medium',
+            complexity: 'simple'
+          },
+          sessionType: 'general_research'
         };
       }
     });
 
-    // Define workflow flow
-    workflow.addEdge("analyze_session_context", "generate_session_decision");
+    // Define conditional workflow flow
+    workflow.addEdge("analyze_session_context", "evaluate_session_membership");
+    workflow.addEdge("evaluate_session_membership", "generate_session_decision");
     workflow.addEdge("generate_session_decision", END);
     workflow.setEntryPoint("analyze_session_context");
     
-    // Register multiple workflow names for backward compatibility
+    // Compile and store workflow
     this.workflows.set("session_management", workflow.compile());
-    this.workflows.set("session_type_detection", workflow.compile());
-    this.workflows.set("session_membership", workflow.compile());
-    this.workflows.set("session_analysis", workflow.compile());
     
-    console.log('LangGraph: Session Management workflow ready (combines 3 session workflows)');
+    console.log('LangGraph: Enhanced session management workflow ready (with entity relationship analysis)');
+  }
+
+  /**
+   * Perform entity relationship analysis for consolidation strategy determination
+   */
+  async performEntityRelationshipAnalysis(state) {
+    try {
+      console.log('LangGraph: Starting entity relationship analysis...');
+      const context = state.context || {};
+      const sessionItems = context.sessionItems || [];
+      const researchResults = context.researchResults || [];
+      
+      console.log('LangGraph: Entity analysis inputs:', {
+        sessionItemsCount: sessionItems.length,
+        researchResultsCount: researchResults.length,
+        sessionType: context.sessionType,
+        sessionLabel: context.sessionLabel
+      });
+      
+      const messages = [
+        new SystemMessage(`Analyze entity relationships to determine optimal consolidation strategy for session research.
+
+ENTITY RELATIONSHIP ANALYSIS:
+
+1. IDENTIFY ENTITIES: What are the main entities being researched?
+   - Extract proper names, businesses, products, locations, people
+   - Determine entity types (hotel, restaurant, product, person, etc.)
+
+2. DETERMINE RELATIONSHIPS:
+   - SAME_ENTITY: Different aspects of the same thing (same hotel, same person)
+   - COMPARABLE_ENTITIES: Different options for same purpose (Hotel A vs Hotel B)
+   - COMPLEMENTARY_ENTITIES: Related but different purposes (Hotel + Restaurant in same city)
+   - INDEPENDENT_ENTITIES: Unrelated research topics
+
+3. CONSOLIDATION STRATEGY:
+   - MERGE: For same entity - combine all information into unified profile
+   - COMPARE: For comparable entities - side-by-side analysis for decision-making
+   - COMPLEMENT: For complementary entities - show synergies and coordination
+   - GENERIC: For independent entities - standard consolidation
+
+4. COMPARISON DIMENSIONS: If entities are comparable, identify key comparison aspects
+
+Return JSON with:
+{
+  "entityRelationships": {
+    "type": "SAME_ENTITY|COMPARABLE_ENTITIES|COMPLEMENTARY_ENTITIES|INDEPENDENT_ENTITIES",
+    "consolidationStrategy": "MERGE|COMPARE|COMPLEMENT|GENERIC",
+    "reasoning": "Detailed explanation of entity relationships and strategy choice",
+    "confidence": 0.0-1.0,
+    "entities": [
+      {
+        "id": "entity_1",
+        "name": "Entity Name",
+        "type": "hotel|restaurant|product|person|location|other",
+        "clipboardItemIds": ["item1", "item2"]
+      }
+    ],
+    "comparisonDimensions": ["price", "quality", "location", "features"] // if COMPARE strategy
+  }
+}`),
+        new HumanMessage(`Session Research Entity Analysis:
+
+Session Items:
+${sessionItems.map((item, i) => `${i + 1}. Content: "${item.content}"
+   Source: ${item.source_app}
+   Window: ${item.window_title}`).join('\n')}
+
+Research Results:
+${researchResults.map((result, i) => `${i + 1}. Query: "${result.query}"
+   Aspect: ${result.aspect}
+   Key Findings: ${result.keyFindings?.slice(0, 2).join(', ') || 'No findings'}`).join('\n')}
+
+Session Type: ${context.sessionType || 'unknown'}
+Session Label: ${context.sessionLabel || 'unknown'}
+
+Analyze the entities and their relationships to determine the optimal consolidation strategy.`)
+      ];
+
+      const response = await this.llm.invoke(messages);
+      console.log('LangGraph: Raw AI response for entity analysis:', response.content);
+      
+      let entityAnalysis;
+
+      try {
+        entityAnalysis = JSON.parse(response.content);
+        console.log('LangGraph: Parsed entity analysis:', {
+          hasEntityRelationships: !!entityAnalysis.entityRelationships,
+          entityRelationships: entityAnalysis.entityRelationships
+        });
+        
+        // Validate the response structure
+        if (!entityAnalysis.entityRelationships) {
+          throw new Error('Missing entityRelationships in response');
+        }
+        
+        const relationships = entityAnalysis.entityRelationships;
+        
+        // Ensure required fields with fallbacks
+        relationships.type = relationships.type || 'INDEPENDENT_ENTITIES';
+        relationships.consolidationStrategy = relationships.consolidationStrategy || 'GENERIC';
+        relationships.reasoning = relationships.reasoning || 'Entity relationship analysis completed';
+        relationships.confidence = relationships.confidence || 0.6;
+        relationships.entities = relationships.entities || [];
+        
+        // Add comparison dimensions for COMPARE strategy
+        if (relationships.consolidationStrategy === 'COMPARE' && !relationships.comparisonDimensions) {
+          relationships.comparisonDimensions = this.getDefaultComparisonDimensions(context.sessionType);
+        }
+        
+        console.log('LangGraph: Validated entity analysis:', {
+          consolidationStrategy: relationships.consolidationStrategy,
+          relationshipType: relationships.type,
+          entityCount: relationships.entities.length,
+          confidence: relationships.confidence
+        });
+        
+      } catch (parseError) {
+        console.log('LangGraph: Entity relationship analysis JSON parsing failed, using pattern-based fallback');
+        console.log('LangGraph: Parse error:', parseError.message);
+        console.log('LangGraph: Raw response that failed to parse:', response.content);
+        
+        // Generate fallback entity analysis
+        const fallbackAnalysis = this.generateEntityAnalysisFallback(sessionItems, context);
+        entityAnalysis = {
+          entityRelationships: fallbackAnalysis
+        };
+        
+        console.log('LangGraph: Generated fallback entity analysis:', {
+          consolidationStrategy: fallbackAnalysis.consolidationStrategy,
+          relationshipType: fallbackAnalysis.type,
+          reasoning: fallbackAnalysis.reasoning
+        });
+      }
+
+      const result = {
+        ...state,
+        entityRelationships: entityAnalysis.entityRelationships,
+        sessionReasoning: entityAnalysis.entityRelationships.reasoning
+      };
+      
+      console.log('LangGraph: Returning entity analysis result:', {
+        hasEntityRelationships: !!result.entityRelationships,
+        consolidationStrategy: result.entityRelationships?.consolidationStrategy,
+        relationshipType: result.entityRelationships?.type
+      });
+      
+      return result;
+
+    } catch (error) {
+      console.error('LangGraph: Error in entity relationship analysis:', error);
+      
+      // Generate fallback and return it properly
+      const fallbackAnalysis = this.generateEntityAnalysisFallback(state.context?.sessionItems || [], state.context || {});
+      
+      console.log('LangGraph: Error fallback entity analysis:', {
+        consolidationStrategy: fallbackAnalysis.consolidationStrategy,
+        relationshipType: fallbackAnalysis.type,
+        reasoning: fallbackAnalysis.reasoning
+      });
+      
+      return {
+        ...state,
+        entityRelationships: fallbackAnalysis,
+        sessionReasoning: fallbackAnalysis.reasoning
+      };
+    }
+  }
+
+  /**
+   * Perform traditional session membership analysis
+   */
+  async performSessionMembershipAnalysis(state) {
+    // This is the existing session analysis logic
+    const context = state.context || {};
+    
+    const messages = [
+      new SystemMessage(`Analyze session context for clipboard content management.
+
+Determine:
+1. What type of session this content belongs to
+2. Whether it should join an existing session
+3. User intent and purpose
+
+Return JSON with basic session analysis.`),
+      new HumanMessage(`Content: ${state.content}
+Source App: ${context.sourceApp || 'unknown'}
+Window Title: ${context.windowTitle || 'unknown'}`)
+    ];
+
+    try {
+      const response = await this.llm.invoke(messages);
+      const analysis = JSON.parse(response.content);
+      
+      return {
+        ...state,
+        sessionType: analysis.sessionType || 'general_research',
+        sessionReasoning: analysis.reasoning || 'Session context analyzed'
+      };
+    } catch (error) {
+      return this.getSessionAnalysisFallback(state);
+    }
+  }
+
+  /**
+   * Generate fallback entity analysis when AI analysis fails
+   */
+  generateEntityAnalysisFallback(sessionItems, context) {
+    const entities = sessionItems.map((item, index) => ({
+      id: `entity_${index + 1}`,
+      name: item.content.split(' ').slice(0, 3).join(' '),
+      type: this.detectEntityTypeFromContent(item.content),
+      clipboardItemIds: [item.id]
+    }));
+
+    const entityTypes = [...new Set(entities.map(e => e.type))];
+    
+    let strategy = 'GENERIC';
+    let relationshipType = 'INDEPENDENT_ENTITIES';
+    
+    if (entities.length <= 1) {
+      strategy = 'MERGE';
+      relationshipType = 'SAME_ENTITY';
+    } else if (entityTypes.length === 1 && context.sessionType?.includes('research')) {
+      strategy = 'COMPARE';
+      relationshipType = 'COMPARABLE_ENTITIES';
+    } else if (entityTypes.length > 1 && this.areEntityTypesComplementary(entityTypes)) {
+      strategy = 'COMPLEMENT';
+      relationshipType = 'COMPLEMENTARY_ENTITIES';
+    }
+
+    return {
+      type: relationshipType,
+      consolidationStrategy: strategy,
+      reasoning: `Pattern-based analysis: ${entities.length} entities of types ${entityTypes.join(', ')}`,
+      confidence: 0.6,
+      entities: entities,
+      comparisonDimensions: strategy === 'COMPARE' ? this.getDefaultComparisonDimensions(context.sessionType) : []
+    };
+  }
+
+  /**
+   * Detect entity type from content
+   */
+  detectEntityTypeFromContent(content) {
+    const lowerContent = content.toLowerCase();
+    
+    if (lowerContent.includes('hotel') || lowerContent.includes('resort') || lowerContent.includes('inn')) {
+      return 'hotel';
+    } else if (lowerContent.includes('restaurant') || lowerContent.includes('dining') || lowerContent.includes('menu')) {
+      return 'restaurant';
+    } else if (lowerContent.includes('product') || lowerContent.includes('buy') || lowerContent.includes('price')) {
+      return 'product';
+    } else if (lowerContent.includes('person') || /^[A-Z][a-z]+ [A-Z][a-z]+/.test(content)) {
+      return 'person';
+    } else if (lowerContent.includes('location') || lowerContent.includes('address') || lowerContent.includes('city')) {
+      return 'location';
+    }
+    
+    return 'general';
+  }
+
+  /**
+   * Check if entity types are complementary
+   */
+  areEntityTypesComplementary(entityTypes) {
+    const complementaryPairs = [
+      ['hotel', 'restaurant'],
+      ['hotel', 'travel'],
+      ['restaurant', 'travel']
+    ];
+    
+    return complementaryPairs.some(pair => 
+      pair.every(type => entityTypes.some(entityType => entityType.includes(type)))
+    );
+  }
+
+  /**
+   * Get default comparison dimensions for session type
+   */
+  getDefaultComparisonDimensions(sessionType) {
+    const dimensionMap = {
+      'hotel_research': ['price', 'amenities', 'location', 'reviews'],
+      'restaurant_research': ['cuisine', 'price', 'atmosphere', 'reviews'],
+      'product_research': ['features', 'price', 'quality', 'reviews'],
+      'academic_research': ['relevance', 'authority', 'methodology'],
+      'travel_research': ['cost', 'convenience', 'experience']
+    };
+    
+    return dimensionMap[sessionType] || ['features', 'quality', 'value'];
+  }
+
+  /**
+   * Get session analysis fallback
+   */
+  getSessionAnalysisFallback(state) {
+    return {
+      ...state,
+      sessionType: 'general_research',
+      belongsToSession: false,
+      membershipConfidence: 0.3,
+      sessionReasoning: 'Fallback session analysis',
+      entityRelationships: null
+    };
   }
 
   /**
@@ -1679,9 +1984,8 @@ Number of hotels: ${state.extractedHotels.length}`)
   }
 
   /**
-   * Session Research Consolidation Workflow - Unified session research summarization
-   * Consolidates: Research Objective + Summary + Intent + Goals + Next Steps
-   * Reduces API calls from 5 separate calls to 1 comprehensive analysis
+   * Session Research Consolidation Workflow - Enhanced with entity relationship analysis
+   * Consolidates session research results with intelligent strategy selection
    */
   async setupSessionResearchConsolidationWorkflow() {
     const workflow = new StateGraph({
@@ -1689,159 +1993,276 @@ Number of hotels: ${state.extractedHotels.length}`)
         content: String,
         context: Object,
         existingAnalysis: Object,
-        // Session context
-        sessionContext: Object,
-        researchScope: Object,
-        // Research input data
-        researchData: Object,
-        // Consolidated outputs
+        // Consolidation results
         researchObjective: String,
         summary: String,
         primaryIntent: String,
         researchGoals: Array,
         nextSteps: Array,
-        // Analysis metadata
-        analysisQuality: String,
-        consolidationMethod: String
+        // Entity analysis results
+        consolidationStrategy: String,
+        entityAnalysis: Object,
+        comparisonMatrix: Object,
+        consolidatedProfile: Object,
+        synergies: Array,
+        coordinationOpportunities: Array,
+        recommendations: Array
       }
     });
 
-    // Single comprehensive analysis node that generates all required fields
     workflow.addNode("consolidate_session_research", async (state) => {
       try {
-        console.log('LangGraph: Consolidating session research with comprehensive analysis...');
+        const context = state.context || {};
+        const existingAnalysis = state.existingAnalysis || {};
+        const consolidationType = context.consolidationType || 'complete_session_summary';
         
-        const sessionContext = state.context?.sessionContext || {};
-        const researchScope = state.context?.researchScope || {};
-        const researchData = state.existingAnalysis?.researchData || {};
-        
-        const sessionType = sessionContext.sessionType || 'general_research';
-        const entitiesResearched = researchScope.entitiesResearched || [];
-        const aspectsCovered = researchScope.aspectsCovered || [];
-        const totalSources = researchScope.totalSources || 0;
-        const totalFindings = researchScope.totalFindings || 0;
-        
-        // Create comprehensive prompt for all session summary fields
-        const messages = [
-          new SystemMessage(`You are a session research consolidator. Generate ALL required fields for a comprehensive session summary in ONE analysis.
+        let systemPrompt = `Consolidate session research results with intelligent strategy-aware analysis.`;
+        let analysisStructure = {};
 
-REQUIRED OUTPUT (JSON format):
+        // Adapt consolidation strategy based on the consolidation type
+        if (consolidationType === 'entity_comparison') {
+          systemPrompt = `Generate comprehensive comparison analysis between multiple entities.
+
+COMPARISON ANALYSIS REQUIREMENTS:
+1. ENTITY COMPARISON MATRIX: For each entity, analyze:
+   - Strengths: Key advantages and standout features
+   - Weaknesses: Limitations and areas of concern
+   - Unique Features: What sets this apart from others
+   - Best Use Cases: Optimal scenarios for this option
+
+2. RECOMMENDATIONS: Provide scenario-based recommendations:
+   - "Best for [scenario]": [Entity name] because [specific reasoning]
+   - Consider different user needs and priorities
+
+3. DECISION GUIDANCE: Help with selection process:
+   - Clear winner in specific categories
+   - Trade-offs to consider
+   - Final recommendation with reasoning
+
+4. COMPARISON DIMENSIONS: Analyze across: ${context.comparisonDimensions?.join(', ') || 'features, quality, value'}
+
+Return JSON with:
 {
-  "researchObjective": "Clear, concise research objective (1-2 sentences)",
-  "summary": "Comprehensive summary of research findings and insights (2-3 paragraphs)",
-  "primaryIntent": "Main user intent or goal (1 sentence)",
-  "researchGoals": ["goal1", "goal2", "goal3"] (3-5 actionable goals),
-  "nextSteps": ["step1", "step2", "step3"] (3-4 concrete next actions)
-}
+  "researchObjective": "A summary of the task at hand, comparing [entities] for [purpose]",
+  "summary": "A comprehensive comparison summary with decision guidance",
+  "primaryIntent": "Select best option from comparison",
+  "researchGoals": ["Compare all options", "Identify best choice", "Make informed decision"],
+  "nextSteps": ["Review comparison matrix", "Consider priorities", "Make selection"],
+  "comparisonMatrix": {
+    "entity_1": {
+      "strengths": ["strength1", "strength2"],
+      "weaknesses": ["weakness1"],
+      "uniqueFeatures": ["feature1"],
+      "bestFor": ["scenario1", "scenario2"]
+    }
+  },
+  "recommendations": [
+    {
+      "entity": "entity_name",
+      "scenario": "Business traveler",
+      "reasoning": "Best amenities for work"
+    }
+  ]
+}`;
+          
+          analysisStructure = {
+            comparisonMatrix: 'object',
+            recommendations: 'array'
+          };
 
-GUIDELINES:
-- Research Objective: Focus on what was researched, not methodology
-- Summary: Describe actual findings and insights from the research
-- Primary Intent: Identify the user's main goal or purpose
-- Goals: Actionable objectives based on the research type
-- Next Steps: Concrete actions the user should take
+        } else if (consolidationType === 'entity_merger') {
+          systemPrompt = `Generate comprehensive merged profile for a single entity researched across multiple aspects.
 
-Session Type: ${sessionType}
-Entities Researched: ${entitiesResearched.join(', ')}
-Aspects Covered: ${aspectsCovered.join(', ')}
-Total Sources: ${totalSources}
-Total Findings: ${totalFindings}`),
-          new HumanMessage(`Consolidate research for: ${state.content}
+MERGED ANALYSIS REQUIREMENTS:
+1. CONSOLIDATE INFORMATION: Combine all research findings into unified view:
+   - Eliminate redundancy and repetition
+   - Synthesize complementary information
+   - Resolve any conflicting data with explanation
 
-Session Context:
-- Type: ${sessionType}
-- Items: ${sessionContext.itemCount || 0}
-- Duration: ${sessionContext.timespan || 0} minutes
+2. COMPREHENSIVE PROFILE: Create complete entity overview:
+   - Key characteristics and features
+   - Detailed analysis by category/aspect
+   - Overall assessment and evaluation
 
-Research Scope:
-- Entities: ${entitiesResearched.join(', ')}
-- Aspects: ${aspectsCovered.join(', ')}
-- Quality: ${researchScope.researchQuality || 'moderate'}
+3. UNIFIED INSIGHTS: Show how different research aspects connect:
+   - How findings from different sources complement each other
+   - Complete picture that emerges from all research
 
-Key Findings Available: ${totalFindings}
-Sources Consulted: ${totalSources}
+4. ENTITY UNDERSTANDING: Deep analysis of: ${existingAnalysis.entity?.name || 'researched entity'}
 
-Research Data Summary:
-${this.formatResearchDataForPrompt(researchData)}
+Return JSON with:
+{
+  "researchObjective": "Comprehensive analysis of [entity]",
+  "summary": "Complete unified profile with all aspects integrated",
+  "primaryIntent": "Thoroughly understand [entity]",
+  "researchGoals": ["Complete comprehensive analysis", "Understand all aspects", "Make informed decision"],
+  "nextSteps": ["Review complete profile", "Evaluate suitability", "Proceed with decision"],
+  "consolidatedProfile": {
+    "overview": "Comprehensive entity overview",
+    "keyFeatures": ["feature1", "feature2"],
+    "detailedAnalysis": {
+      "category1": "analysis1",
+      "category2": "analysis2"
+    },
+    "sourcesSynthesis": "How different sources complement each other"
+  }
+}`;
+          
+          analysisStructure = {
+            consolidatedProfile: 'object'
+          };
 
-Generate comprehensive session consolidation with all required fields.`)
+        } else if (consolidationType === 'entity_complementary') {
+          systemPrompt = `Generate complementary analysis showing how different entities work together synergistically.
+
+COMPLEMENTARY ANALYSIS REQUIREMENTS:
+1. SYNERGY IDENTIFICATION: Find ways entities complement each other:
+   - Shared themes and connections
+   - Coordination opportunities
+   - Combined experience optimization
+
+2. RELATIONSHIP ANALYSIS: Understand entity interactions:
+   - How entities enhance each other
+   - Timing and proximity considerations
+   - Coordinated planning benefits
+
+3. UNIFIED STRATEGY: Plan coordinated approach:
+   - How to use entities together effectively
+   - Sequencing and timing recommendations
+   - Optimization strategies
+
+4. COMPLEMENTARY ENTITIES: ${existingAnalysis.entities?.map(e => e.name).join(' and ') || 'related entities'}
+
+Return JSON with:
+{
+  "researchObjective": "Understand synergies between [entities]",
+  "summary": "Analysis of how entities complement each other with coordination guidance",
+  "primaryIntent": "Plan coordinated use of multiple entities",
+  "researchGoals": ["Identify synergies", "Plan coordination", "Optimize combined experience"],
+  "nextSteps": ["Plan coordinated approach", "Consider timing", "Book complementary services"],
+  "synergies": [
+    {
+      "theme": "location",
+      "description": "How entities share location benefits",
+      "coordination": "Timing and proximity recommendations"
+    }
+  ],
+  "coordinationOpportunities": [
+    "Opportunity 1: Combined booking benefits",
+    "Opportunity 2: Coordinated timing advantages"
+  ]
+}`;
+          
+          analysisStructure = {
+            synergies: 'array',
+            coordinationOpportunities: 'array'
+          };
+
+        } else {
+          // Default comprehensive session analysis
+          systemPrompt = `Consolidate comprehensive session research results into unified analysis.
+
+CONSOLIDATION REQUIREMENTS:
+1. RESEARCH OBJECTIVE: Clear statement of what was researched and why
+2. COMPREHENSIVE SUMMARY: Synthesize all findings into coherent overview
+3. PRIMARY INTENT: Main purpose and goal of the research session
+4. RESEARCH GOALS: 3-4 specific objectives achieved
+5. NEXT STEPS: 3-4 actionable recommendations based on findings
+
+Return JSON with:
+{
+  "researchObjective": "Clear research objective statement",
+  "summary": "Comprehensive summary of all findings",
+  "primaryIntent": "Main research purpose and intent",
+  "researchGoals": ["Goal 1", "Goal 2", "Goal 3"],
+  "nextSteps": ["Action 1", "Action 2", "Action 3"]
+}`;
+        }
+
+        const messages = [
+          new SystemMessage(systemPrompt),
+          new HumanMessage(`Session Research Consolidation:
+
+Content: ${state.content}
+
+Context: ${JSON.stringify(context)}
+
+Research Data: ${JSON.stringify(existingAnalysis.researchData || {})}
+
+Consolidation Strategy: ${existingAnalysis.consolidationStrategy || 'GENERIC'}
+
+${existingAnalysis.entities ? `Entities: ${JSON.stringify(existingAnalysis.entities)}` : ''}
+
+${existingAnalysis.comparisonDimensions ? `Comparison Dimensions: ${existingAnalysis.comparisonDimensions.join(', ')}` : ''}`)
         ];
-        
+
         const response = await this.llm.invoke(messages);
-        let consolidatedResult;
-        
+        let analysis;
+
         try {
-          consolidatedResult = JSON.parse(response.content);
-          
-          // Validate required fields
-          const requiredFields = ['researchObjective', 'summary', 'primaryIntent', 'researchGoals', 'nextSteps'];
-          const missingFields = requiredFields.filter(field => !consolidatedResult[field]);
-          
-          if (missingFields.length > 0) {
-            throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-          }
-          
-          // Ensure arrays are proper arrays
-          if (!Array.isArray(consolidatedResult.researchGoals)) {
-            consolidatedResult.researchGoals = [consolidatedResult.researchGoals].filter(Boolean);
-          }
-          if (!Array.isArray(consolidatedResult.nextSteps)) {
-            consolidatedResult.nextSteps = [consolidatedResult.nextSteps].filter(Boolean);
-          }
-          
+          analysis = JSON.parse(response.content);
         } catch (parseError) {
-          console.log('LangGraph: Failed to parse consolidation result, generating structured fallback');
+          console.log('LangGraph: Session research consolidation JSON parsing failed, using fallback');
+          // Fallback analysis
+          analysis = {
+            researchObjective: `Research analysis for ${context.sessionType || 'session'}`,
+            summary: `Consolidated analysis of research findings with ${existingAnalysis.researchData?.findings?.length || 0} findings`,
+            primaryIntent: 'Information gathering and analysis',
+            researchGoals: ['Complete comprehensive research', 'Analyze findings', 'Make informed decisions'],
+            nextSteps: ['Review findings', 'Evaluate options', 'Take appropriate action']
+          };
           
-          // Generate structured fallback
-          consolidatedResult = this.generateConsolidationFallback(
-            sessionType, 
-            entitiesResearched, 
-            aspectsCovered, 
-            totalSources, 
-            totalFindings
-          );
+          // Add strategy-specific fallback data
+          if (consolidationType === 'entity_comparison') {
+            analysis.comparisonMatrix = {};
+            analysis.recommendations = [];
+          } else if (consolidationType === 'entity_merger') {
+            analysis.consolidatedProfile = {};
+          } else if (consolidationType === 'entity_complementary') {
+            analysis.synergies = [];
+            analysis.coordinationOpportunities = [];
+          }
         }
         
         return {
           ...state,
-          researchObjective: consolidatedResult.researchObjective,
-          summary: consolidatedResult.summary,
-          primaryIntent: consolidatedResult.primaryIntent,
-          researchGoals: consolidatedResult.researchGoals,
-          nextSteps: consolidatedResult.nextSteps,
-          analysisQuality: totalSources > 5 && totalFindings > 8 ? 'high' : totalSources > 2 && totalFindings > 4 ? 'good' : 'moderate',
-          consolidationMethod: 'ai_comprehensive'
+          researchObjective: analysis.researchObjective || `Research analysis`,
+          summary: analysis.summary || 'Research consolidation completed',
+          primaryIntent: analysis.primaryIntent || 'Information gathering',
+          researchGoals: analysis.researchGoals || ['Research completed'],
+          nextSteps: analysis.nextSteps || ['Review findings'],
+          consolidationStrategy: existingAnalysis.consolidationStrategy || 'GENERIC',
+          // Strategy-specific results
+          comparisonMatrix: analysis.comparisonMatrix || null,
+          consolidatedProfile: analysis.consolidatedProfile || null,
+          synergies: analysis.synergies || null,
+          coordinationOpportunities: analysis.coordinationOpportunities || null,
+          recommendations: analysis.recommendations || null
         };
         
       } catch (error) {
-        console.error('LangGraph: Error in session research consolidation:', error);
-        
-        // Generate basic fallback
-        const sessionType = state.context?.sessionContext?.sessionType || 'general_research';
-        const entities = state.context?.researchScope?.entitiesResearched || ['research topics'];
-        const aspects = state.context?.researchScope?.aspectsCovered || ['general information'];
-        
+        console.error('Session research consolidation error:', error);
+        // Robust fallback
         return {
           ...state,
-          researchObjective: `${sessionType.replace('_', ' ')} analysis of ${entities.slice(0, 2).join(' and ')}`,
-          summary: `Completed comprehensive research analysis covering ${aspects.join(', ')} with detailed findings and insights.`,
-          primaryIntent: entities.length > 1 ? `Compare ${entities.slice(0, 2).join(' and ')}` : `Research ${entities[0]}`,
-          researchGoals: ['Complete comprehensive analysis', 'Gather relevant information', 'Make informed decisions'],
-          nextSteps: ['Review research findings', 'Evaluate options', 'Take appropriate action'],
-          analysisQuality: 'basic',
-          consolidationMethod: 'fallback'
+          researchObjective: `Research analysis for session`,
+          summary: 'Research consolidation completed with basic analysis',
+          primaryIntent: 'Information gathering and analysis',
+          researchGoals: ['Gather information', 'Analyze findings', 'Support decision-making'],
+          nextSteps: ['Review research results', 'Evaluate options', 'Take appropriate action'],
+          consolidationStrategy: 'FALLBACK'
         };
       }
     });
 
-    // Set workflow flow (single node)
+    // Define workflow flow
     workflow.addEdge("consolidate_session_research", END);
     workflow.setEntryPoint("consolidate_session_research");
     
     // Compile and store workflow
     this.workflows.set("session_research_consolidation", workflow.compile());
     
-    console.log('LangGraph: Session Research Consolidation workflow ready (unified 5-in-1 analysis)');
+    console.log('LangGraph: Enhanced session research consolidation workflow ready (strategy-aware)');
   }
 
   /**
@@ -2555,10 +2976,10 @@ For next steps, consider gathering additional sources to enhance understanding a
       }
     });
 
-    // Single comprehensive query generation node
+    // Single comprehensive query generation node - MODIFIED to return single query per entity
     workflow.addNode("generate_research_queries", async (state) => {
       try {
-        console.log('LangGraph: Generating intelligent research queries...');
+        console.log('LangGraph: Generating single intelligent research query...');
         
         const entryAnalysis = state.entryAnalysis || {};
         const sessionType = state.sessionType || 'general_research';
@@ -2571,44 +2992,29 @@ For next steps, consider gathering additional sources to enhance understanding a
         console.log(`LangGraph: Analyzing ${contentType} content for ${sessionType} session`);
 
         const messages = [
-          new SystemMessage(`You are an intelligent research query generator. Generate 1-3 targeted research queries based on the content and context provided.
+          new SystemMessage(`You are an intelligent research query generator. Generate ONE highly targeted, comprehensive research query based on the content and context provided.
 
 **REQUIREMENTS:**
-1. ALWAYS include the original content exactly as copied in the first query
-2. Generate 1-3 total queries (including the original content query)
-3. Make queries specific and actionable for web search
-4. Consider the session type and content type for context
-5. Each query should research a different aspect
+1. Generate exactly ONE query that captures the most important aspects of the content
+2. Make the query specific and actionable for web search
+3. Consider the session type and content type for context
+4. Include the original content as the primary search term
+5. Combine relevant contextual information into a single focused query
 
-**QUERY TYPES:**
-- original_content_research: Exact content + "detailed information reviews features pricing availability"
-- contextual_research: Related information based on content type and session context
-- comparative_research: Alternatives or comparisons when appropriate
+**QUERY STRATEGY:**
+- Start with the original content as the core search term
+- Add the most relevant contextual modifiers based on session type and content analysis
+- Create a comprehensive query that would return the most useful information
+- Keep the query concise but comprehensive (3-8 words typically)
 
 **SESSION TYPE CONTEXT:**
-- hotel_research: Focus on pricing, amenities, location, reviews
-- restaurant_research: Focus on menu, reviews, reservations, experience  
-- product_research: Focus on specs, pricing, alternatives, reviews
-- academic_research: Focus on sources, recent findings, related work
-- general_research: Focus on comprehensive information
+- hotel_research: Add "reviews amenities location pricing" 
+- restaurant_research: Add "menu reviews reservations experience"
+- product_research: Add "specifications reviews alternatives pricing"
+- academic_research: Add "recent research scholarly sources"
+- general_research: Add "comprehensive information details"
 
-Return JSON array of query objects:
-{
-  "queries": [
-    {
-      "aspect": "original_content_research",
-      "searchQuery": "exact original content detailed information reviews features pricing availability",
-      "knownInfo": "Original content: exact content",
-      "researchGap": "Comprehensive information about the specific item copied"
-    },
-    {
-      "aspect": "contextual_research",
-      "searchQuery": "contextually relevant query based on analysis",
-      "knownInfo": "Context from analysis",
-      "researchGap": "Specific gap this query addresses"
-    }
-  ]
-}`),
+Return only the single search query as a plain text string (not JSON).`),
           new HumanMessage(`**CONTENT TO ANALYZE:**
 Original Content: "${originalContent}"
 
@@ -2621,95 +3027,85 @@ Visual Context: ${JSON.stringify(visualContext)}
 Source App: ${entryAnalysis.sourceApp || 'unknown'}
 Window Title: ${entryAnalysis.windowTitle || 'unknown'}
 
-Generate 1-3 targeted research queries that will provide comprehensive information about this content.`)
+Generate ONE highly targeted research query that will provide the most comprehensive information about this content.`)
         ];
         
         const response = await this.llm.invoke(messages);
-        let queryResult;
+        let researchQuery;
         
         try {
-          queryResult = JSON.parse(response.content);
+          // Expect a single string response
+          researchQuery = response.content.trim();
           
-          // Validate and structure the queries
-          if (!queryResult.queries || !Array.isArray(queryResult.queries)) {
-            throw new Error('Invalid query structure');
+          // Clean the query - remove quotes, extra whitespace, and any JSON artifacts
+          researchQuery = researchQuery.replace(/^["']|["']$/g, '').trim();
+          researchQuery = researchQuery.replace(/\n/g, ' ').replace(/\s+/g, ' ');
+          
+          // If it looks like JSON was returned accidentally, try to extract the query
+          if (researchQuery.startsWith('{') || researchQuery.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(researchQuery);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                researchQuery = parsed[0].searchQuery || parsed[0].query || parsed[0];
+              } else if (typeof parsed === 'object' && (parsed.searchQuery || parsed.query)) {
+                researchQuery = parsed.searchQuery || parsed.query;
+              }
+            } catch (e) {
+              // If JSON parsing fails, clean up the string
+              researchQuery = researchQuery.replace(/[{}\[\]"]/g, '').replace(/searchQuery:|query:/g, '').trim();
+            }
           }
           
-          // Ensure we have the original content query
-          let hasOriginalQuery = queryResult.queries.some(q => 
-            q.aspect === 'original_content_research' || 
-            q.searchQuery.includes(originalContent.substring(0, 20))
-          );
-          
-          if (!hasOriginalQuery) {
-            // Prepend the original content query
-            queryResult.queries.unshift({
-              aspect: 'original_content_research',
-              searchQuery: `${originalContent} detailed information reviews features pricing availability`,
-              knownInfo: `Original content: ${originalContent}`,
-              researchGap: 'Comprehensive information about the specific item copied'
-            });
+          // Validate query
+          if (!researchQuery || researchQuery.length < 3 || researchQuery.length > 200) {
+            throw new Error('Invalid query generated');
           }
-          
-          // Limit to 3 queries and validate structure
-          queryResult.queries = queryResult.queries.slice(0, 3).map(query => ({
-            aspect: query.aspect || 'research',
-            searchQuery: query.searchQuery || query.query || '',
-            knownInfo: query.knownInfo || 'Content analysis',
-            researchGap: query.researchGap || 'Additional information needed'
-          })).filter(query => query.searchQuery.length > 0);
           
         } catch (parseError) {
-          console.log('LangGraph: Failed to parse AI-generated queries, creating intelligent fallback');
+          console.log('LangGraph: Failed to parse AI-generated query, creating intelligent fallback');
           
           // Intelligent fallback based on content analysis
-          queryResult = {
-            queries: [
-              {
-                aspect: 'original_content_research',
-                searchQuery: `${originalContent} detailed information reviews features pricing availability`,
-                knownInfo: `Original content: ${originalContent}`,
-                researchGap: 'Comprehensive information about the specific item copied'
-              }
-            ]
-          };
+          researchQuery = originalContent;
           
-          // Add contextual query based on content type and session type
-          if (contentType === 'location' && sessionType === 'hotel_research') {
-            queryResult.queries.push({
-              aspect: 'area_research',
-              searchQuery: `${originalContent} hotels accommodations options reviews recommendations`,
-              knownInfo: `Location: ${originalContent}`,
-              researchGap: 'Hotel options and recommendations in this area'
-            });
-          } else if (contentType === 'product' || sessionType === 'product_research') {
-            queryResult.queries.push({
-              aspect: 'product_comparison',
-              searchQuery: `${originalContent} specifications reviews alternatives comparison`,
-              knownInfo: `Product: ${originalContent}`,
-              researchGap: 'Product specifications and alternatives'
-            });
+          // Add contextual modifiers based on session type and content type
+          if (sessionType === 'hotel_research') {
+            researchQuery += ' reviews amenities location pricing';
+          } else if (sessionType === 'restaurant_research') {
+            researchQuery += ' menu reviews reservations experience';
+          } else if (sessionType === 'product_research') {
+            researchQuery += ' specifications reviews alternatives pricing';
+          } else if (sessionType === 'academic_research') {
+            researchQuery += ' recent research scholarly sources';
+          } else if (contentType === 'location') {
+            researchQuery += ' information guide recommendations';
+          } else if (contentType === 'product') {
+            researchQuery += ' specifications reviews comparison';
           } else if (tags.length > 0) {
-            queryResult.queries.push({
-              aspect: 'contextual_research',
-              searchQuery: `${originalContent} ${tags.slice(0, 2).join(' ')} information guide`,
-              knownInfo: `Context: ${tags.join(', ')}`,
-              researchGap: 'Additional contextual information'
-            });
+            researchQuery += ` ${tags.slice(0, 2).join(' ')}`;
+          } else {
+            researchQuery += ' comprehensive information details';
           }
         }
         
-        console.log(`LangGraph: Generated ${queryResult.queries.length} intelligent research queries`);
+        // Create the single query result in expected format
+        const queryResult = {
+          aspect: 'comprehensive_research',
+          searchQuery: researchQuery,
+          knownInfo: `Original content: ${originalContent}`,
+          researchGap: 'Comprehensive information about the specific item copied'
+        };
+        
+        console.log(`LangGraph: Generated single intelligent research query: "${researchQuery}"`);
         
         return {
           ...state,
-          researchQueries: queryResult.queries,
-          queryCount: queryResult.queries.length,
-          analysisMethod: 'ai_intelligent'
+          researchQueries: [queryResult],
+          queryCount: 1,
+          analysisMethod: 'ai_intelligent_single'
         };
         
       } catch (error) {
-        console.error('LangGraph: Error in query generation:', error);
+        console.error('LangGraph: Error in single query generation:', error);
         
         // Basic fallback - ensure original content is always included
         const originalContent = state.entryAnalysis?.content || state.content || '';
@@ -2719,13 +3115,13 @@ Generate 1-3 targeted research queries that will provide comprehensive informati
           researchQueries: [
             {
               aspect: 'original_content_research',
-              searchQuery: `${originalContent} detailed information reviews features pricing availability`,
+              searchQuery: `${originalContent} comprehensive information details`,
               knownInfo: `Original content: ${originalContent}`,
               researchGap: 'Comprehensive information about the specific item copied'
             }
           ],
           queryCount: 1,
-          analysisMethod: 'fallback'
+          analysisMethod: 'fallback_single'
         };
       }
     });

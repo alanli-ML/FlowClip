@@ -558,6 +558,51 @@ class Database {
     };
   }
 
+  async getAllTags() {
+    try {
+      // Get all items with tags
+      const stmt = this.db.prepare(`
+        SELECT tags 
+        FROM clipboard_items 
+        WHERE tags IS NOT NULL AND tags != '[]'
+        ORDER BY timestamp DESC
+      `);
+      
+      const rows = stmt.all();
+      const tagCounts = new Map();
+
+      // Process each row to extract and count tags
+      rows.forEach(row => {
+        try {
+          const tags = JSON.parse(row.tags || '[]');
+          if (Array.isArray(tags)) {
+            tags.forEach(tag => {
+              if (tag && typeof tag === 'string' && tag.trim()) {
+                const cleanTag = tag.trim();
+                tagCounts.set(cleanTag, (tagCounts.get(cleanTag) || 0) + 1);
+              }
+            });
+          }
+        } catch (parseError) {
+          // Skip malformed tag data
+          console.log('Database: Skipping malformed tag data:', row.tags);
+        }
+      });
+
+      // Convert to array and sort by usage count
+      const tagsArray = Array.from(tagCounts.entries()).map(([tag, count]) => ({
+        name: tag,
+        count: count
+      })).sort((a, b) => b.count - a.count);
+
+      console.log(`Database: Found ${tagsArray.length} unique tags`);
+      return tagsArray;
+    } catch (error) {
+      console.error('Database: Error getting all tags:', error);
+      return [];
+    }
+  }
+
   async cleanup(olderThanDays = 30) {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
