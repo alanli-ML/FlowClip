@@ -1410,50 +1410,135 @@ class ConsolidatedSessionSummarizer {
     }
     
     const entityNames = entities.map(e => e.name);
-    const dimensions = comparisonDimensions || Object.keys(comparisonMatrix);
     
-    if (dimensions.length === 0 || entityNames.length === 0) {
+    if (entityNames.length === 0) {
       return '';
     }
     
-    let matrixOutput = '\n\n';
+    console.log('ConsolidatedSessionSummarizer: Formatting comparison matrix with data:', {
+      comparisonMatrix,
+      entities: entityNames,
+      comparisonDimensions
+    });
     
-    // Create table header
-    const maxDimensionLength = Math.max(...dimensions.map(d => d.length), 8);
-    const maxEntityLength = Math.max(...entityNames.map(n => n.length), 6);
+    // First, determine what dimensions/aspects actually exist in the data
+    const actualDimensions = new Set();
+    
+    // Check the AI-generated structure (entity-first)
+    Object.keys(comparisonMatrix).forEach(key => {
+      const entityData = comparisonMatrix[key];
+      if (entityData && typeof entityData === 'object') {
+        Object.keys(entityData).forEach(dimension => {
+          actualDimensions.add(dimension);
+        });
+      }
+    });
+    
+    // Use actual dimensions from the data, fallback to provided dimensions
+    const dimensionsToUse = actualDimensions.size > 0 ? 
+      Array.from(actualDimensions) : 
+      (comparisonDimensions || []);
+    
+    if (dimensionsToUse.length === 0) {
+      return '';
+    }
+    
+    console.log('ConsolidatedSessionSummarizer: Using dimensions:', dimensionsToUse);
+    
+    let tableOutput = '\n\n## Comparison Matrix\n\n';
+    
+    // Create HTML table for better formatting
+    tableOutput += '<table border="1" style="border-collapse: collapse; width: 100%;">\n';
     
     // Header row
-    matrixOutput += `| ${'Aspect'.padEnd(maxDimensionLength)} |`;
+    tableOutput += '  <tr style="background-color: #f5f5f5; font-weight: bold;">\n';
+    tableOutput += '    <th style="padding: 8px; text-align: left;">Aspect</th>\n';
     entityNames.forEach(name => {
-      matrixOutput += ` ${name.padEnd(maxEntityLength)} |`;
+      tableOutput += `    <th style="padding: 8px; text-align: center;">${this.escapeHtml(name)}</th>\n`;
     });
-    matrixOutput += '\n';
-    
-    // Separator row
-    matrixOutput += `|${'-'.repeat(maxDimensionLength + 2)}|`;
-    entityNames.forEach(() => {
-      matrixOutput += `${'-'.repeat(maxEntityLength + 2)}|`;
-    });
-    matrixOutput += '\n';
+    tableOutput += '  </tr>\n';
     
     // Data rows
-    dimensions.forEach(dimension => {
-      matrixOutput += `| ${dimension.padEnd(maxDimensionLength)} |`;
+    dimensionsToUse.forEach(dimension => {
+      tableOutput += '  <tr>\n';
+      tableOutput += `    <td style="padding: 8px; font-weight: bold;">${this.escapeHtml(dimension)}</td>\n`;
       
       entityNames.forEach(entityName => {
-        const value = comparisonMatrix[dimension]?.[entityName] || 
-                     comparisonMatrix[entityName]?.[dimension] || 
-                     'N/A';
-        const displayValue = typeof value === 'string' ? value : String(value);
-        const truncatedValue = displayValue.length > maxEntityLength ? 
-                              displayValue.substring(0, maxEntityLength - 3) + '...' : 
-                              displayValue;
-        matrixOutput += ` ${truncatedValue.padEnd(maxEntityLength)} |`;
+        let value = 'N/A';
+        
+        // Try to find the entity data by name or ID
+        let entityData = null;
+        
+        // First try by entity name directly
+        if (comparisonMatrix[entityName]) {
+          entityData = comparisonMatrix[entityName];
+        } else {
+          // Try by entity ID
+          const entity = entities.find(e => e.name === entityName);
+          if (entity && comparisonMatrix[entity.id]) {
+            entityData = comparisonMatrix[entity.id];
+          } else {
+            // Try to find by partial name match or any key that contains the entity name
+            const possibleKey = Object.keys(comparisonMatrix).find(key => 
+              key.toLowerCase().includes(entityName.toLowerCase()) || 
+              entityName.toLowerCase().includes(key.toLowerCase())
+            );
+            if (possibleKey) {
+              entityData = comparisonMatrix[possibleKey];
+            }
+          }
+        }
+        
+        // Extract value from entity data
+        if (entityData && typeof entityData === 'object') {
+          if (entityData[dimension]) {
+            value = entityData[dimension];
+          } else {
+            // Try case-insensitive match
+            const dimensionKey = Object.keys(entityData).find(key => 
+              key.toLowerCase() === dimension.toLowerCase()
+            );
+            if (dimensionKey) {
+              value = entityData[dimensionKey];
+            }
+          }
+        }
+        
+        // Format the value for display
+        let displayValue;
+        if (Array.isArray(value)) {
+          displayValue = value.join(', ');
+        } else if (typeof value === 'object') {
+          displayValue = JSON.stringify(value);
+        } else {
+          displayValue = String(value);
+        }
+        
+        const cleanValue = displayValue.length > 100 ? 
+                          displayValue.substring(0, 97) + '...' : 
+                          displayValue;
+        
+        tableOutput += `    <td style="padding: 8px; text-align: left;">${this.escapeHtml(cleanValue)}</td>\n`;
       });
-      matrixOutput += '\n';
+      tableOutput += '  </tr>\n';
     });
     
-    return matrixOutput;
+    tableOutput += '</table>\n\n';
+    
+    return tableOutput;
+  }
+
+  /**
+   * Escape HTML characters for safe display
+   */
+  escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // Helper methods for quality assessment and grouping

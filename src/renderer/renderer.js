@@ -18,10 +18,6 @@ class FlowClipRenderer {
   }
 
   async init() {
-    // Add platform-specific CSS class
-    const platform = await ipcRenderer.invoke('get-platform');
-    document.body.classList.add(`platform-${platform}`);
-    
     await this.loadSettings();
     this.setupEventListeners();
     this.loadClipboardHistory();
@@ -1118,108 +1114,15 @@ class FlowClipRenderer {
     const tagsContainer = document.getElementById('tags-container');
     tagsContainer.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading tags...</div>';
     
-    try {
-      const tags = await ipcRenderer.invoke('get-all-tags');
-      
-      if (!tags || tags.length === 0) {
+    setTimeout(() => {
       tagsContainer.innerHTML = `
         <div class="empty-state">
           <i class="fas fa-tags"></i>
           <h3>No tags yet</h3>
-            <p>AI will automatically tag your clipboard items as you use the app</p>
+          <p>AI will automatically tag your clipboard items</p>
         </div>
       `;
-        return;
-      }
-
-      // Group tags by usage frequency
-      const popularTags = tags.filter(tag => tag.count >= 5);
-      const commonTags = tags.filter(tag => tag.count >= 2 && tag.count < 5);
-      const rareTags = tags.filter(tag => tag.count < 2);
-
-      tagsContainer.innerHTML = `
-        <div class="tags-container">
-          ${popularTags.length > 0 ? `
-            <div class="tags-section">
-              <h3><i class="fas fa-star"></i> Popular Tags</h3>
-              <div class="tags-grid">
-                ${popularTags.map(tag => `
-                  <div class="tag-item popular" data-tag="${this.escapeHtml(tag.name)}">
-                    <span class="tag-name">${this.escapeHtml(tag.name)}</span>
-                    <span class="tag-count">${tag.count}</span>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-          
-          ${commonTags.length > 0 ? `
-            <div class="tags-section">
-              <h3><i class="fas fa-tags"></i> Common Tags</h3>
-              <div class="tags-grid">
-                ${commonTags.map(tag => `
-                  <div class="tag-item common" data-tag="${this.escapeHtml(tag.name)}">
-                    <span class="tag-name">${this.escapeHtml(tag.name)}</span>
-                    <span class="tag-count">${tag.count}</span>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-          
-          ${rareTags.length > 0 ? `
-            <div class="tags-section">
-              <h3><i class="fas fa-tag"></i> Other Tags</h3>
-              <div class="tags-grid">
-                ${rareTags.map(tag => `
-                  <div class="tag-item rare" data-tag="${this.escapeHtml(tag.name)}">
-                    <span class="tag-name">${this.escapeHtml(tag.name)}</span>
-                    <span class="tag-count">${tag.count}</span>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-          
-          <div class="tags-summary">
-            <p><strong>Total:</strong> ${tags.length} unique tags across ${tags.reduce((sum, tag) => sum + tag.count, 0)} tagged items</p>
-          </div>
-        </div>
-      `;
-
-      // Add click handlers for tag filtering
-      tagsContainer.querySelectorAll('.tag-item').forEach(tagElement => {
-        tagElement.addEventListener('click', () => {
-          const tagName = tagElement.dataset.tag;
-          this.filterByTag(tagName);
-        });
-      });
-
-    } catch (error) {
-      console.error('Error loading tags:', error);
-      tagsContainer.innerHTML = `
-        <div class="empty-state">
-          <i class="fas fa-exclamation-triangle text-warning"></i>
-          <h3>Error loading tags</h3>
-          <p>There was a problem loading your tags. Please try again.</p>
-        </div>
-      `;
-    }
-  }
-
-  filterByTag(tagName) {
-    console.log(`Filtering by tag: ${tagName}`);
-    // Switch to clipboard view and apply tag filter
-    this.switchView('clipboard');
-    
-    // Set search query to find items with this tag
-    const searchInput = document.getElementById('search-input');
-    if (searchInput) {
-      searchInput.value = `tag:${tagName}`;
-      this.handleSearch(`tag:${tagName}`);
-    }
-    
-    this.showToast(`Showing items tagged with "${tagName}"`, 'info');
+    }, 1000);
   }
 
   async loadStatsView() {
@@ -1927,61 +1830,25 @@ class FlowClipRenderer {
         
         container.innerHTML = `
           <div class="session-research-results">
-            <!-- Three Key Metrics - Horizontal Layout -->
-            <div class="research-metrics-horizontal">
-              <!-- Research Confidence Score -->
-              <div class="research-confidence-banner">
-                <div class="confidence-score">
-                  <div class="confidence-details">
-                    <div class="confidence-metric">
-                      <div class="confidence-percentage">${Math.round(confidence * 100)}%</div>
-                      <div class="confidence-label">Research Confidence</div>
-                    </div>
+            <!-- Research Confidence Score - Prominently displayed -->
+            <div class="research-confidence-banner">
+              <div class="confidence-score">
+                <div class="confidence-circle">
+                  <div class="confidence-percentage">${Math.round(confidence * 100)}%</div>
+                  <div class="confidence-label">Research Confidence</div>
+                </div>
+                <div class="confidence-details">
+                  <div class="confidence-metric">
+                    <strong>${totalSources}</strong> Sources
+                  </div>
+                  <div class="confidence-metric">
+                    <strong>${keyFindings.length}</strong> Key Findings
+                  </div>
+                  <div class="confidence-metric">
+                    <strong>${searchQueries.length}</strong> Research Queries
                   </div>
                 </div>
               </div>
-
-              <!-- Key Findings -->
-              ${keyFindings.length > 0 ? `
-                <div class="research-findings-section">
-                  <h5><i class="fas fa-lightbulb"></i> Key Findings</h5>
-                  <ul class="key-findings-list">
-                    ${keyFindings.slice(0, 4).map(finding => `<li>${this.escapeHtml(finding)}</li>`).join('')}
-                  </ul>
-                </div>
-              ` : `
-                <div class="research-findings-section">
-                  <h5><i class="fas fa-lightbulb"></i> Key Findings</h5>
-                  <p class="no-findings">No findings available</p>
-                </div>
-              `}
-
-              <!-- Research Sources -->
-              ${sources.length > 0 ? `
-                <div class="research-sources-section">
-                  <h5><i class="fas fa-link"></i> Sources (${totalSources})</h5>
-                  <div class="sources-grid">
-                    ${sources.slice(0, 3).map(source => `
-                      <div class="source-card">
-                        <div class="source-title">${this.escapeHtml(source.title || source.source || 'Source')}</div>
-                        ${source.url ? `<div class="source-url"><a href="${this.escapeHtml(source.url)}" target="_blank">${this.truncateText(source.url, 30)}</a></div>` : ''}
-                        ${source.snippet ? `<div class="source-snippet">${this.escapeHtml(this.truncateText(source.snippet, 60))}</div>` : ''}
-                      </div>
-                    `).join('')}
-                    ${sources.length > 3 ? `
-                      <div class="source-card source-more">
-                        <i class="fas fa-plus"></i>
-                        <span>+${sources.length - 3} more</span>
-                      </div>
-                    ` : ''}
-                  </div>
-                </div>
-              ` : `
-                <div class="research-sources-section">
-                  <h5><i class="fas fa-link"></i> Sources (0)</h5>
-                  <p class="no-sources">No sources available</p>
-                </div>
-              `}
             </div>
 
             <!-- Primary Intent and Research Objective -->
@@ -2002,6 +1869,38 @@ class FlowClipRenderer {
                 ${sessionResearch.comprehensiveSummary || 'No comprehensive summary available'}
               </div>
             </div>
+
+            <!-- Key Findings -->
+            ${keyFindings.length > 0 ? `
+              <div class="research-findings-section">
+                <h5><i class="fas fa-lightbulb"></i> Key Findings</h5>
+                <ul class="key-findings-list">
+                  ${keyFindings.map(finding => `<li>${this.escapeHtml(finding)}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+
+            <!-- Research Data & Sources -->
+            ${sources.length > 0 ? `
+              <div class="research-sources-section">
+                <h5><i class="fas fa-link"></i> Research Sources (${totalSources})</h5>
+                <div class="sources-grid">
+                  ${sources.slice(0, 6).map(source => `
+                    <div class="source-card">
+                      <div class="source-title">${this.escapeHtml(source.title || source.source || 'Source')}</div>
+                      ${source.url ? `<div class="source-url"><a href="${this.escapeHtml(source.url)}" target="_blank">${this.truncateText(source.url, 40)}</a></div>` : ''}
+                      ${source.snippet ? `<div class="source-snippet">${this.escapeHtml(this.truncateText(source.snippet, 80))}</div>` : ''}
+                    </div>
+                  `).join('')}
+                  ${sources.length > 6 ? `
+                    <div class="source-card source-more">
+                      <i class="fas fa-plus"></i>
+                      <span>+${sources.length - 6} more sources</span>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            ` : ''}
 
             <!-- Session Insights -->
             ${sessionResearch.sessionInsights ? `

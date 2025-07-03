@@ -760,11 +760,6 @@ class FlowClipApp {
   }
 
   setupIPC() {
-    // Get platform information for CSS styling
-    ipcMain.handle('get-platform', async () => {
-      return process.platform;
-    });
-
     // Get clipboard history
     ipcMain.handle('get-clipboard-history', async (event, options = {}) => {
       const items = await this.database.getClipboardHistory(options);
@@ -942,11 +937,6 @@ class FlowClipApp {
     // Add tags to clipboard item
     ipcMain.handle('add-tags', async (event, clipboardItemId, tags) => {
       return await this.database.addTags(clipboardItemId, tags);
-    });
-
-    // Get all unique tags
-    ipcMain.handle('get-all-tags', async (event) => {
-      return await this.database.getAllTags();
     });
 
     // Delete clipboard item
