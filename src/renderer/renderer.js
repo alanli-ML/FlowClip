@@ -1122,13 +1122,13 @@ class FlowClipRenderer {
       const tags = await ipcRenderer.invoke('get-all-tags');
       
       if (!tags || tags.length === 0) {
-        tagsContainer.innerHTML = `
-          <div class="empty-state">
-            <i class="fas fa-tags"></i>
-            <h3>No tags yet</h3>
+      tagsContainer.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-tags"></i>
+          <h3>No tags yet</h3>
             <p>AI will automatically tag your clipboard items as you use the app</p>
-          </div>
-        `;
+        </div>
+      `;
         return;
       }
 

@@ -1113,7 +1113,7 @@ Generate a single, comprehensive search query for this specific topic:`)
           // Enhanced fallback when no search results are available
           console.log('LangGraph Research: No search results, generating comprehensive analysis...');
           
-          const messages = [
+        const messages = [
             new SystemMessage(`You are an expert research analyst creating a concise, well-formatted research summary for a UI display.
 
 FORMATTING REQUIREMENTS:
@@ -1140,9 +1140,9 @@ Based on your knowledge, provide insights about the topic in flowing paragraph f
             new HumanMessage(`Research Topic: ${state.content}
 
 Create a concise, well-formatted analysis (under 250 words):`)
-          ];
-
-          const response = await this.llm.invoke(messages);
+        ];
+        
+        const response = await this.llm.invoke(messages);
           const rawAnalysis = response.content;
           
           // Format and clean up the analysis for UI display
@@ -1314,7 +1314,7 @@ For next steps, consider gathering additional sources to verify findings and exp
           return this.performSessionMembershipAnalysis(state);
         }
         
-          } catch (error) {
+      } catch (error) {
         console.error('Session context analysis error:', error);
         return this.getSessionAnalysisFallback(state);
       }
@@ -1432,10 +1432,10 @@ Screenshot Available: ${!!context.screenshotPath}
 
 Current Analysis Context: ${state.sessionReasoning || 'No previous analysis'}`)
         ];
-
+        
         const response = await this.llm.invoke(messages);
         let decisionResult;
-
+        
         try {
           decisionResult = JSON.parse(response.content);
         } catch (parseError) {
@@ -1514,7 +1514,7 @@ Current Analysis Context: ${state.sessionReasoning || 'No previous analysis'}`)
         sessionLabel: context.sessionLabel
       });
       
-      const messages = [
+        const messages = [
         new SystemMessage(`Analyze entity relationships to determine optimal consolidation strategy for session research.
 
 ENTITY RELATIONSHIP ANALYSIS:
@@ -1571,9 +1571,9 @@ Session Type: ${context.sessionType || 'unknown'}
 Session Label: ${context.sessionLabel || 'unknown'}
 
 Analyze the entities and their relationships to determine the optimal consolidation strategy.`)
-      ];
-
-      const response = await this.llm.invoke(messages);
+        ];
+        
+        const response = await this.llm.invoke(messages);
       console.log('LangGraph: Raw AI response for entity analysis:', response.content);
       
       let entityAnalysis;
@@ -1611,7 +1611,7 @@ Analyze the entities and their relationships to determine the optimal consolidat
           confidence: relationships.confidence
         });
         
-      } catch (parseError) {
+        } catch (parseError) {
         console.log('LangGraph: Entity relationship analysis JSON parsing failed, using pattern-based fallback');
         console.log('LangGraph: Parse error:', parseError.message);
         console.log('LangGraph: Raw response that failed to parse:', response.content);
@@ -1630,7 +1630,7 @@ Analyze the entities and their relationships to determine the optimal consolidat
       }
 
       const result = {
-        ...state,
+          ...state,
         entityRelationships: entityAnalysis.entityRelationships,
         sessionReasoning: entityAnalysis.entityRelationships.reasoning
       };
@@ -1643,7 +1643,7 @@ Analyze the entities and their relationships to determine the optimal consolidat
       
       return result;
 
-    } catch (error) {
+      } catch (error) {
       console.error('LangGraph: Error in entity relationship analysis:', error);
       
       // Generate fallback and return it properly
@@ -1654,9 +1654,9 @@ Analyze the entities and their relationships to determine the optimal consolidat
         relationshipType: fallbackAnalysis.type,
         reasoning: fallbackAnalysis.reasoning
       });
-      
-      return {
-        ...state,
+        
+        return {
+          ...state,
         entityRelationships: fallbackAnalysis,
         sessionReasoning: fallbackAnalysis.reasoning
       };
@@ -1669,8 +1669,8 @@ Analyze the entities and their relationships to determine the optimal consolidat
   async performSessionMembershipAnalysis(state) {
     // This is the existing session analysis logic
     const context = state.context || {};
-    
-    const messages = [
+
+        const messages = [
       new SystemMessage(`Analyze session context for clipboard content management.
 
 Determine:
@@ -1679,21 +1679,21 @@ Determine:
 3. User intent and purpose
 
 Return JSON with basic session analysis.`),
-      new HumanMessage(`Content: ${state.content}
+          new HumanMessage(`Content: ${state.content}
 Source App: ${context.sourceApp || 'unknown'}
 Window Title: ${context.windowTitle || 'unknown'}`)
-    ];
-
+        ];
+        
     try {
-      const response = await this.llm.invoke(messages);
+        const response = await this.llm.invoke(messages);
       const analysis = JSON.parse(response.content);
-      
-      return {
-        ...state,
+        
+        return {
+          ...state,
         sessionType: analysis.sessionType || 'general_research',
         sessionReasoning: analysis.reasoning || 'Session context analyzed'
-      };
-    } catch (error) {
+        };
+      } catch (error) {
       return this.getSessionAnalysisFallback(state);
     }
   }
@@ -1724,8 +1724,8 @@ Window Title: ${context.windowTitle || 'unknown'}`)
       strategy = 'COMPLEMENT';
       relationshipType = 'COMPLEMENTARY_ENTITIES';
     }
-
-    return {
+        
+        return {
       type: relationshipType,
       consolidationStrategy: strategy,
       reasoning: `Pattern-based analysis: ${entities.length} entities of types ${entityTypes.join(', ')}`,
@@ -1790,8 +1790,8 @@ Window Title: ${context.windowTitle || 'unknown'}`)
    * Get session analysis fallback
    */
   getSessionAnalysisFallback(state) {
-    return {
-      ...state,
+        return {
+          ...state,
       sessionType: 'general_research',
       belongsToSession: false,
       membershipConfidence: 0.3,
@@ -1819,7 +1819,7 @@ Window Title: ${context.windowTitle || 'unknown'}`)
     // Step 1: Extract Hotels and Context
     workflow.addNode("extract_hotels_context", async (state) => {
       try {
-        const messages = [
+            const messages = [
           new SystemMessage(`Extract hotel names and location context from the session items.
 
 Identify:
@@ -1840,26 +1840,26 @@ Respond with JSON:
   "dateRange": "if found"
 }`),
           new HumanMessage(`Session Items: ${JSON.stringify(state.sessionItems, null, 2)}`)
-        ];
-        
-        const response = await this.llm.invoke(messages);
+            ];
+            
+            const response = await this.llm.invoke(messages);
         let extraction;
-        
-        try {
+            
+            try {
           extraction = JSON.parse(response.content);
-        } catch (parseError) {
+            } catch (parseError) {
           extraction = { hotels: [], location: "unknown" };
-        }
-        
-        return {
-          ...state,
+          }
+          
+          return {
+            ...state,
           extractedHotels: extraction.hotels || [],
           locationContext: extraction.location || "unknown",
           userPreferences: extraction.preferences || {}
-        };
+          };
       } catch (error) {
-        return {
-          ...state,
+          return {
+            ...state,
           extractedHotels: [],
           locationContext: "unknown",
           userPreferences: {}
@@ -1871,15 +1871,15 @@ Respond with JSON:
     workflow.addNode("generate_comparison", async (state) => {
       try {
         if (state.extractedHotels.length < 2) {
-          return {
-            ...state,
+        return {
+          ...state,
             comparison: { 
               summary: "Need more hotels for comparison",
               canCompare: false
             }
           };
         }
-
+        
         const messages = [
           new SystemMessage(`Create a comparison analysis for these hotels in ${state.locationContext}.
 
@@ -2195,10 +2195,10 @@ ${existingAnalysis.entities ? `Entities: ${JSON.stringify(existingAnalysis.entit
 
 ${existingAnalysis.comparisonDimensions ? `Comparison Dimensions: ${existingAnalysis.comparisonDimensions.join(', ')}` : ''}`)
         ];
-
+        
         const response = await this.llm.invoke(messages);
         let analysis;
-
+        
         try {
           analysis = JSON.parse(response.content);
         } catch (parseError) {
@@ -2721,7 +2721,7 @@ ${existingAnalysis.comparisonDimensions ? `Comparison Dimensions: ${existingAnal
               text: `${contextPrompt || 'Analyze this screenshot for context.'}\n\nContent that was copied: "${contentPreview}"`
           },
           {
-            type: "image_url", 
+            type: "image_url",
             image_url: {
               url: `data:image/png;base64,${base64Image}`,
               detail: "auto"
@@ -2740,7 +2740,7 @@ ${existingAnalysis.comparisonDimensions ? `Comparison Dimensions: ${existingAnal
         // Cache the successful result
         this.setVisionAnalysisCache(cacheKey, response.content);
         
-        return response.content;
+      return response.content;
       } catch (visionError) {
         console.log('LangGraph: Vision model error:', visionError.message);
         
