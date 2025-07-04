@@ -269,8 +269,38 @@ class SessionManagerRefactored extends EventEmitter {
       // Run comprehensive session research (non-blocking)
       this.researchWorkflow.performSessionResearch(sessionId, (progress) => {
         this.emit('session-research-progress', progress);
+      }).then(async (consolidatedResults) => {
+        if (consolidatedResults) {
+          SessionLogger.log(`Research workflow completed for session ${sessionId}, updating session with results`);
+          
+          // Update the session with the research results
+          await this.updateSessionWithResearchResults(sessionId, consolidatedResults);
+          
+          // Emit the completion event that the UI expects
+          this.emit('session-research-completed', {
+            sessionId: sessionId,
+            sessionType: consolidatedResults.sessionType || 'unknown',
+            researchResults: consolidatedResults,
+            itemCount: sessionItemCount,
+            keyFindings: consolidatedResults.keyFindings?.length || 0,
+            totalSources: consolidatedResults.totalSources || 0,
+            researchQuality: consolidatedResults.researchQuality || 'unknown'
+          });
+          
+          SessionLogger.log(`Session research completed event emitted for session ${sessionId}`);
+        } else {
+          SessionLogger.log(`Research workflow returned null results for session ${sessionId}`);
+          this.emit('session-research-failed', {
+            sessionId: sessionId,
+            error: 'No research results returned'
+          });
+        }
       }).catch(error => {
         SessionLogger.error('Background comprehensive session research failed', '', error);
+        this.emit('session-research-failed', {
+          sessionId: sessionId,
+          error: error.message
+        });
       });
     } else {
       SessionLogger.log(`Session only has ${sessionItemCount} item - skipping comprehensive research`);
@@ -712,7 +742,37 @@ class SessionManagerRefactored extends EventEmitter {
 
   // Delegate research workflow operations
   async performSessionResearch(sessionId, progressCallback = null) {
-    return this.researchWorkflow.performSessionResearch(sessionId, progressCallback);
+    try {
+      const consolidatedResults = await this.researchWorkflow.performSessionResearch(sessionId, progressCallback);
+      
+      if (consolidatedResults) {
+        SessionLogger.log(`Manual research workflow completed for session ${sessionId}, updating session with results`);
+        
+        // Update the session with the research results
+        await this.updateSessionWithResearchResults(sessionId, consolidatedResults);
+        
+        // Emit the completion event that the UI expects
+        this.emit('session-research-completed', {
+          sessionId: sessionId,
+          sessionType: consolidatedResults.sessionType || 'unknown',
+          researchResults: consolidatedResults,
+          keyFindings: consolidatedResults.keyFindings?.length || 0,
+          totalSources: consolidatedResults.totalSources || 0,
+          researchQuality: consolidatedResults.researchQuality || 'unknown'
+        });
+        
+        SessionLogger.log(`Manual session research completed event emitted for session ${sessionId}`);
+      }
+      
+      return consolidatedResults;
+    } catch (error) {
+      SessionLogger.error('Manual session research failed', '', error);
+      this.emit('session-research-failed', {
+        sessionId: sessionId,
+        error: error.message
+      });
+      throw error;
+    }
   }
 
   // Delegate analysis workflow operations
