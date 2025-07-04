@@ -296,18 +296,23 @@ class Database {
   }
 
   async searchClipboardItems(query) {
-    // Use FTS for semantic search
+    // Use simple LIKE search for better compatibility
+    const searchTerm = `%${query.toLowerCase()}%`;
+    
     const stmt = this.db.prepare(`
-      SELECT c.*, bm25(clipboard_search) as rank
-      FROM clipboard_search
-      JOIN clipboard_items c ON clipboard_search.id = c.id
-      WHERE clipboard_search MATCH ?
-      ORDER BY bm25(clipboard_search), c.timestamp DESC
+      SELECT * FROM clipboard_items
+      WHERE (
+        LOWER(content) LIKE ?
+        OR LOWER(source_app) LIKE ?
+        OR LOWER(window_title) LIKE ?
+        OR LOWER(surrounding_text) LIKE ?
+        OR LOWER(tags) LIKE ?
+      )
+      ORDER BY timestamp DESC
       LIMIT 20
     `);
 
-    const searchQuery = query.replace(/[^\w\s]/g, '').trim();
-    const rows = stmt.all(searchQuery);
+    const rows = stmt.all(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
 
     return rows.map(row => ({
       ...row,
@@ -503,6 +508,58 @@ class Database {
     return result.changes > 0;
   }
 
+  async getAllTags() {
+    const stmt = this.db.prepare(`
+      SELECT tags, COUNT(*) as item_count
+      FROM clipboard_items 
+      WHERE tags IS NOT NULL AND tags != '[]'
+      ORDER BY timestamp DESC
+    `);
+    
+    const rows = stmt.all();
+    const tagCounts = new Map();
+    
+    // Process each row and extract individual tags
+    rows.forEach(row => {
+      try {
+        const tags = JSON.parse(row.tags || '[]');
+        tags.forEach(tag => {
+          if (tag && tag.trim()) {
+            const normalizedTag = tag.trim().toLowerCase();
+            tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
+          }
+        });
+      } catch (error) {
+        console.error('Error parsing tags for row:', row, error);
+      }
+    });
+    
+    // Convert to array and sort by usage count
+    return Array.from(tagCounts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  async getItemsByTag(tag) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM clipboard_items 
+      WHERE tags LIKE ?
+      ORDER BY timestamp DESC
+      LIMIT 20
+    `);
+    
+    const rows = stmt.all(`%"${tag}"%`);
+    
+    return rows
+      .map(row => ({
+        ...row,
+        tags: JSON.parse(row.tags || '[]')
+      }))
+      .filter(item => 
+        item.tags.some(itemTag => itemTag.toLowerCase() === tag.toLowerCase())
+      );
+  }
+
   async deleteClipboardItem(id) {
     const stmt = this.db.prepare('DELETE FROM clipboard_items WHERE id = ?');
     const result = stmt.run(id);
@@ -525,7 +582,7 @@ class Database {
   async getStats() {
     const totalItems = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items').get();
     const totalTasks = this.db.prepare('SELECT COUNT(*) as count FROM ai_tasks').get();
-    const completedTasks = this.db.prepare('SELECT COUNT(*) as count FROM ai_tasks WHERE status = "completed"').get();
+    const completedTasks = this.db.prepare("SELECT COUNT(*) as count FROM ai_tasks WHERE status = 'completed'").get();
     
     const topApps = this.db.prepare(`
       SELECT source_app, COUNT(*) as count 

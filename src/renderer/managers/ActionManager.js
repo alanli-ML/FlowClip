@@ -294,21 +294,97 @@ class ActionManager {
          </span>`
       : '';
     
+    // Set initial collapsed state - collapsed for historical, expanded for new
+    const isCollapsed = isHistorical;
+    const toggleIcon = isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up';
+    const contentClass = isCollapsed ? 'collapsed' : 'expanded';
+    
     resultElement.innerHTML = `
       <div class="action-result-header">
+        <button class="action-result-toggle" data-action="toggle-result">
+          <i class="fas ${toggleIcon}"></i>
+        </button>
         <i class="fas fa-${config.icon}"></i>
         <span class="action-result-title">${config.label} Result</span>
         ${timeIndicator}
-        <button class="btn btn-xs action-result-close" onclick="this.parentElement.parentElement.remove()">
+        <button class="btn btn-xs action-result-close" data-action="close-result">
           <i class="fas fa-times"></i>
         </button>
       </div>
-      <div class="action-result-content">
+      <div class="action-result-content ${contentClass}">
         ${formattedResult}
       </div>
     `;
 
+    // Add event listeners
+    this.addResultEventListeners(resultElement);
+
     return resultElement;
+  }
+
+  /**
+   * Add event listeners to action result element
+   */
+  addResultEventListeners(resultElement) {
+    const toggleButton = resultElement.querySelector('.action-result-toggle');
+    const closeButton = resultElement.querySelector('.action-result-close');
+    const content = resultElement.querySelector('.action-result-content');
+    const header = resultElement.querySelector('.action-result-header');
+    
+    // Prevent the entire action result from bubbling up to clipboard item
+    resultElement.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    
+    // Prevent header clicks from bubbling up
+    if (header) {
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+    
+    if (toggleButton) {
+      toggleButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        this.toggleResultContent(content, toggleButton);
+      });
+    }
+    
+    if (closeButton) {
+      closeButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        resultElement.remove();
+      });
+    }
+    
+    // Also prevent content clicks from bubbling up
+    if (content) {
+      content.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+  }
+
+  /**
+   * Toggle result content visibility
+   */
+  toggleResultContent(content, toggleButton) {
+    const isCollapsed = content.classList.contains('collapsed');
+    const icon = toggleButton.querySelector('i');
+    
+    if (isCollapsed) {
+      content.classList.remove('collapsed');
+      content.classList.add('expanded');
+      icon.classList.remove('fa-chevron-down');
+      icon.classList.add('fa-chevron-up');
+    } else {
+      content.classList.remove('expanded');
+      content.classList.add('collapsed');
+      icon.classList.remove('fa-chevron-up');
+      icon.classList.add('fa-chevron-down');
+    }
   }
 
   /**
@@ -321,16 +397,22 @@ class ActionManager {
     errorElement.className = 'action-result action-error';
     errorElement.innerHTML = `
       <div class="action-result-header">
+        <button class="action-result-toggle" data-action="toggle-result">
+          <i class="fas fa-chevron-up"></i>
+        </button>
         <i class="fas fa-exclamation-triangle"></i>
         <span class="action-result-title">${config.label} Error</span>
-        <button class="btn btn-xs action-result-close" onclick="this.parentElement.parentElement.remove()">
+        <button class="btn btn-xs action-result-close" data-action="close-result">
           <i class="fas fa-times"></i>
         </button>
       </div>
-      <div class="action-result-content">
+      <div class="action-result-content expanded">
         ${errorMessage}
       </div>
     `;
+
+    // Add event listeners
+    this.addResultEventListeners(errorElement);
 
     return errorElement;
   }

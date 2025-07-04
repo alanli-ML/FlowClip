@@ -27,12 +27,22 @@ class FlowClipRenderer {
 
   async init() {
     await this.loadSettings();
+    this.setupElectronAPI();
     this.setupEventListeners();
     this.clipboardManager.loadClipboardHistory();
     this.setupIPCListeners();
     
     // Initialize search context for the default view
     this.updateSearchContext(this.currentView);
+  }
+
+  setupElectronAPI() {
+    // Expose Electron APIs to the window object for use by other modules
+    window.electronAPI = {
+      openExternal: async (url) => {
+        return await ipcRenderer.invoke('open-external', url);
+      }
+    };
   }
 
   async loadSettings() {
@@ -284,14 +294,103 @@ class FlowClipRenderer {
     const tagsContainer = document.getElementById('tags-container');
     this.uiRenderer.renderLoadingState(tagsContainer, 'Loading tags...');
     
-    setTimeout(() => {
+    try {
+      const tags = await ipcRenderer.invoke('get-all-tags');
+      this.renderTagsView(tags);
+    } catch (error) {
+      console.error('Error loading tags:', error);
+      this.uiRenderer.renderErrorState(tagsContainer, 'Error loading tags');
+    }
+  }
+
+  renderTagsView(tags) {
+    const tagsContainer = document.getElementById('tags-container');
+    
+    if (!tags || tags.length === 0) {
       this.uiRenderer.renderEmptyState(
         tagsContainer,
         'tags',
         'No tags yet',
-        'AI will automatically tag your clipboard items'
+        'AI will automatically tag your clipboard items as you copy content'
       );
-    }, 1000);
+      return;
+    }
+
+    const totalItems = tags.reduce((sum, tag) => sum + tag.count, 0);
+    
+    tagsContainer.innerHTML = `
+      <div class="tags-header">
+        <div class="tags-stats">
+          <div class="stat-item">
+            <span class="stat-value">${tags.length}</span>
+            <span class="stat-label">Unique Tags</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">${totalItems}</span>
+            <span class="stat-label">Tagged Items</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="tags-grid">
+        ${tags.map(tag => `
+          <div class="tag-card" data-tag="${tag.tag}">
+            <div class="tag-name">${FormatUtils.escapeHtml(tag.tag)}</div>
+            <div class="tag-count">${tag.count} item${tag.count !== 1 ? 's' : ''}</div>
+            <div class="tag-actions">
+              <button class="btn btn-sm btn-outline" onclick="window.flowClipRenderer.viewTagItems('${FormatUtils.escapeHtml(tag.tag)}')">
+                <i class="fas fa-eye"></i>
+                View Items
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    // Add click handlers for tag cards
+    tagsContainer.querySelectorAll('.tag-card').forEach(element => {
+      element.addEventListener('click', (e) => {
+        if (!e.target.closest('.tag-actions')) {
+          const tag = element.dataset.tag;
+          this.viewTagItems(tag);
+        }
+      });
+    });
+  }
+
+  async viewTagItems(tag) {
+    try {
+      this.uiRenderer.showToast(`Loading items tagged with "${tag}"...`, 'info');
+      const items = await ipcRenderer.invoke('get-items-by-tag', tag);
+      
+      // Switch to history view and filter by tag
+      this.switchView('history');
+      this.clipboardManager.filterByTag(tag, items);
+      
+      // Update search input to show the tag filter
+      const searchInput = document.getElementById('search-input');
+      searchInput.value = `tag:${tag}`;
+      
+    } catch (error) {
+      console.error('Error loading items for tag:', error);
+      this.uiRenderer.showToast(`Error loading items for tag "${tag}"`, 'error');
+    }
+  }
+
+  clearTagFilter() {
+    // Clear the tag filter banner
+    const tagFilterBanner = document.querySelector('.tag-filter-banner');
+    if (tagFilterBanner) {
+      tagFilterBanner.remove();
+    }
+    
+    // Clear the search input
+    const searchInput = document.getElementById('search-input');
+    searchInput.value = '';
+    
+    // Reload the full clipboard history
+    this.clipboardManager.loadClipboardHistory();
   }
 
   async loadStatsView() {

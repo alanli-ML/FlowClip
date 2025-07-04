@@ -398,12 +398,7 @@ class SessionUIManager {
             <div class="research-next-steps">
               <h5><i class="fas fa-arrow-right"></i> Recommended Next Steps</h5>
               <div class="next-steps-list">
-                ${intentData.sessionIntent.nextSteps.map(step => `
-                  <div class="next-step-item">
-                    <i class="fas fa-chevron-right"></i>
-                    <span>${FormatUtils.escapeHtml(step)}</span>
-                  </div>
-                `).join('')}
+                ${intentData.sessionIntent.nextSteps.map(step => this.renderActionableNextStep(step)).join('')}
               </div>
             </div>
           ` : ''}
@@ -881,6 +876,119 @@ class SessionUIManager {
         this.uiRenderer.showLoading(false);
       }
     }, 300);
+  }
+
+  /**
+   * Render actionable next step with clickable link
+   */
+  renderActionableNextStep(step) {
+    // Handle both string steps (legacy) and object steps (new format with links)
+    if (typeof step === 'string') {
+      return `
+        <div class="next-step-item">
+          <i class="fas fa-chevron-right"></i>
+          <span>${FormatUtils.escapeHtml(step)}</span>
+        </div>
+      `;
+    }
+
+    // New format with actionable links
+    if (step && typeof step === 'object' && step.text) {
+      const stepText = FormatUtils.escapeHtml(step.text);
+      const hasLink = step.link && step.link !== null;
+      const linkType = step.linkType || 'search';
+      const confidence = step.confidence || 0;
+      
+      // Determine icon based on link type
+      let linkIcon = 'fas fa-external-link-alt';
+      if (linkType === 'booking') linkIcon = 'fas fa-calendar-check';
+      else if (linkType === 'reservation') linkIcon = 'fas fa-utensils';
+      else if (linkType === 'review') linkIcon = 'fas fa-star';
+      else if (linkType === 'purchase') linkIcon = 'fas fa-shopping-cart';
+      else if (linkType === 'official') linkIcon = 'fas fa-globe';
+      else if (linkType === 'search') linkIcon = 'fas fa-search';
+      
+      // Determine confidence indicator color
+      let confidenceColor = '#ccc';
+      if (confidence >= 0.8) confidenceColor = '#4CAF50';
+      else if (confidence >= 0.6) confidenceColor = '#FF9800';
+      else if (confidence >= 0.3) confidenceColor = '#FFC107';
+      
+      if (hasLink) {
+        return `
+          <div class="next-step-item clickable-step" data-link="${FormatUtils.escapeHtml(step.link)}" data-link-type="${linkType}">
+            <i class="fas fa-chevron-right"></i>
+            <span class="step-text">${stepText}</span>
+            <div class="step-actions">
+              <span class="confidence-indicator" style="color: ${confidenceColor}" title="Link confidence: ${Math.round(confidence * 100)}%">
+                <i class="fas fa-circle" style="font-size: 6px;"></i>
+              </span>
+              <button class="action-link-btn" title="${FormatUtils.escapeHtml(step.description || `Open: ${step.text}`)}" onclick="SessionUIManager.openActionableLink('${FormatUtils.escapeHtml(step.link)}', '${linkType}')">
+                <i class="${linkIcon}"></i>
+                <span class="action-text">Take Action</span>
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        // No link available, show as regular step
+        return `
+          <div class="next-step-item">
+            <i class="fas fa-chevron-right"></i>
+            <span>${stepText}</span>
+            <span class="no-link-indicator" title="No actionable link available">
+              <i class="fas fa-info-circle"></i>
+            </span>
+          </div>
+        `;
+      }
+    }
+
+    // Fallback for malformed step data
+    return `
+      <div class="next-step-item">
+        <i class="fas fa-chevron-right"></i>
+        <span>Review information</span>
+      </div>
+    `;
+  }
+
+  /**
+   * Static method to open actionable links in external browser
+   */
+  static openActionableLink(url, linkType) {
+    console.log(`SessionUIManager: Opening ${linkType} link: ${url}`);
+    
+    try {
+      // Validate URL
+      if (!url || typeof url !== 'string' || url.trim() === '') {
+        console.error('SessionUIManager: Invalid URL provided');
+        return;
+      }
+
+      // Use Electron's shell.openExternal to open in default browser
+      if (window.electronAPI && window.electronAPI.openExternal) {
+        window.electronAPI.openExternal(url).then(() => {
+          console.log('SessionUIManager: Successfully opened link in external browser');
+        }).catch(error => {
+          console.error('SessionUIManager: Error opening external link:', error);
+          // Fallback to window.open
+          window.open(url, '_blank');
+        });
+      } else {
+        // Fallback for non-Electron environments
+        console.log('SessionUIManager: Electron API not available, using window.open fallback');
+        window.open(url, '_blank');
+      }
+    } catch (error) {
+      console.error('SessionUIManager: Error in openActionableLink:', error);
+      // Last resort fallback
+      try {
+        window.open(url, '_blank');
+      } catch (fallbackError) {
+        console.error('SessionUIManager: Even fallback failed:', fallbackError);
+      }
+    }
   }
 }
 

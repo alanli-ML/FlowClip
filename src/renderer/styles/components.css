@@ -427,4 +427,142 @@
 
 .confidence-indicator i {
   font-size: 8px;
+}
+
+/* Actionable Next Steps Components */
+.next-step-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+  transition: all 0.2s ease;
+}
+
+.next-step-item:last-child {
+  border-bottom: none;
+}
+
+.next-step-item.clickable-step {
+  cursor: pointer;
+  background: var(--background-color);
+  border-radius: 8px;
+  padding: 12px 15px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.next-step-item.clickable-step:hover {
+  background: var(--surface-hover);
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.1);
+}
+
+.next-step-item i.fa-chevron-right {
+  color: var(--primary-color);
+  margin-right: 12px;
+  font-size: 0.8rem;
+}
+
+.step-text {
+  flex: 1;
+  margin-right: 12px;
+  font-weight: 500;
+}
+
+.step-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confidence-indicator {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.action-link-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.action-link-btn:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+}
+
+.action-link-btn i {
+  font-size: 0.8rem;
+}
+
+.action-text {
+  white-space: nowrap;
+}
+
+.no-link-indicator {
+  color: var(--text-secondary);
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+/* Link type specific styling */
+.next-step-item[data-link-type="booking"] .action-link-btn {
+  background: #10B981;
+}
+
+.next-step-item[data-link-type="booking"] .action-link-btn:hover {
+  background: #059669;
+}
+
+.next-step-item[data-link-type="reservation"] .action-link-btn {
+  background: #F59E0B;
+}
+
+.next-step-item[data-link-type="reservation"] .action-link-btn:hover {
+  background: #D97706;
+}
+
+.next-step-item[data-link-type="review"] .action-link-btn {
+  background: #8B5CF6;
+}
+
+.next-step-item[data-link-type="review"] .action-link-btn:hover {
+  background: #7C3AED;
+}
+
+.next-step-item[data-link-type="purchase"] .action-link-btn {
+  background: #EF4444;
+}
+
+.next-step-item[data-link-type="purchase"] .action-link-btn:hover {
+  background: #DC2626;
+}
+
+.next-step-item[data-link-type="official"] .action-link-btn {
+  background: #6366F1;
+}
+
+.next-step-item[data-link-type="official"] .action-link-btn:hover {
+  background: #4F46E5;
+}
+
+.next-step-item[data-link-type="search"] .action-link-btn {
+  background: #64748B;
+}
+
+.next-step-item[data-link-type="search"] .action-link-btn:hover {
+  background: #475569;
 } 

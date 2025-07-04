@@ -467,6 +467,41 @@ class ClipboardManager {
   }
 
   /**
+   * Filter clipboard items by tag
+   */
+  filterByTag(tag, items) {
+    this.filteredItems = items;
+    this.renderClipboardItems(items);
+    
+    // Update the filter display
+    const clearFiltersBtn = document.querySelector('.clear-filters-btn');
+    if (clearFiltersBtn) {
+      clearFiltersBtn.style.display = 'block';
+    }
+    
+    // Add tag filter indicator
+    const historyContainer = document.getElementById('history-container');
+    let tagFilterBanner = historyContainer.querySelector('.tag-filter-banner');
+    
+    if (!tagFilterBanner) {
+      tagFilterBanner = document.createElement('div');
+      tagFilterBanner.className = 'tag-filter-banner';
+      historyContainer.insertBefore(tagFilterBanner, historyContainer.firstChild);
+    }
+    
+    tagFilterBanner.innerHTML = `
+      <div class="filter-info">
+        <i class="fas fa-filter"></i>
+        <span>Showing ${items.length} items tagged with "${tag}"</span>
+        <button class="btn btn-sm btn-outline" onclick="window.flowClipRenderer.clearTagFilter()">
+          <i class="fas fa-times"></i>
+          Clear Filter
+        </button>
+      </div>
+    `;
+  }
+
+  /**
    * Clear all clipboard items
    */
   async clearAllItems() {

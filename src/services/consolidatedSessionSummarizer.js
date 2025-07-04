@@ -30,7 +30,7 @@ class ConsolidatedSessionSummarizer {
       if (!entityAnalysis || !entityAnalysis.consolidationStrategy) {
         console.log('ConsolidatedSessionSummarizer: Entity analysis failed, using generic fallback');
         const fallbackData = this.processResearchData(safeResearchResults, entrySpecificResearch || { entries: [], totalQueries: 0 }, session);
-        return this.generateFallbackSummary(fallbackData, session);
+        return await this.generateFallbackSummary(fallbackData, session);
       }
       
       console.log(`ConsolidatedSessionSummarizer: Entity analysis complete - Strategy: ${entityAnalysis.consolidationStrategy}`);
@@ -67,7 +67,7 @@ class ConsolidatedSessionSummarizer {
       } else {
         console.log('ConsolidatedSessionSummarizer: Consolidation returned null, using fallback');
         const fallbackData = this.processResearchData(safeResearchResults, entrySpecificResearch || { entries: [], totalQueries: 0 }, session);
-        return this.generateFallbackSummary(fallbackData, session);
+        return await this.generateFallbackSummary(fallbackData, session);
       }
       
     } catch (error) {
@@ -77,7 +77,7 @@ class ConsolidatedSessionSummarizer {
         // Final fallback - create basic summary
         const safeResearchResults = researchResults || [];
         const fallbackData = this.processResearchData(safeResearchResults, entrySpecificResearch || { entries: [], totalQueries: 0 }, session || { session_type: 'general_research' });
-        return this.generateFallbackSummary(fallbackData, session || { session_type: 'general_research' });
+        return await this.generateFallbackSummary(fallbackData, session || { session_type: 'general_research' });
       } catch (fallbackError) {
         console.error('ConsolidatedSessionSummarizer: Even fallback failed:', fallbackError.message);
         
@@ -827,18 +827,18 @@ class ConsolidatedSessionSummarizer {
       const processedData = this.processResearchData(researchResults, entrySpecificResearch, session);
       
       if (!this.aiService?.langGraphClient) {
-        return this.generateFallbackSummary(processedData, session);
+        return await this.generateFallbackSummary(processedData, session);
       }
 
       const workflowInput = this.buildWorkflowInput(processedData, session, sessionItems);
       const result = await this.aiService.langGraphClient.executeWorkflow('session_research_consolidation', workflowInput);
       
       if (result && this.validateWorkflowResult(result)) {
-        const formattedResult = this.formatWorkflowResult(result, processedData, session);
+        const formattedResult = await this.formatWorkflowResult(result, processedData, session);
         formattedResult.entityAnalysis = entityAnalysis;
         return formattedResult;
       } else {
-        return this.generateFallbackSummary(processedData, session);
+        return await this.generateFallbackSummary(processedData, session);
       }
       
     } catch (error) {
@@ -868,7 +868,7 @@ class ConsolidatedSessionSummarizer {
         researchQuality: 'basic'
       };
       
-      return this.generateFallbackSummary(fallbackProcessedData, session);
+      return await this.generateFallbackSummary(fallbackProcessedData, session);
     }
   }
 
@@ -1041,7 +1041,7 @@ class ConsolidatedSessionSummarizer {
       // Check if AI service is available
       if (!this.aiService?.langGraphClient) {
         console.log('ConsolidatedSessionSummarizer: LangGraph not available, using fallback');
-        return this.generateFallbackSummary(processedData, session);
+        return await this.generateFallbackSummary(processedData, session);
       }
 
       // Create comprehensive research context for the AI workflow
@@ -1053,15 +1053,15 @@ class ConsolidatedSessionSummarizer {
       
       if (result && this.validateWorkflowResult(result)) {
         console.log('ConsolidatedSessionSummarizer: Successfully generated comprehensive session summary');
-        return this.formatWorkflowResult(result, processedData, session);
+        return await this.formatWorkflowResult(result, processedData, session);
       } else {
         console.log('ConsolidatedSessionSummarizer: Invalid workflow result, using fallback');
-        return this.generateFallbackSummary(processedData, session);
+        return await this.generateFallbackSummary(processedData, session);
       }
       
     } catch (error) {
       console.error('ConsolidatedSessionSummarizer: Error generating consolidated summary:', error.message);
-      return this.generateFallbackSummary(this.processResearchData(researchResults, entrySpecificResearch, session), session);
+      return await this.generateFallbackSummary(this.processResearchData(researchResults, entrySpecificResearch, session), session);
     }
   }
 

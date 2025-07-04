@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage, shell } = require('electron');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const screenshot = require('screenshot-desktop');
@@ -939,6 +939,16 @@ class FlowClipApp {
       return await this.database.addTags(clipboardItemId, tags);
     });
 
+    // Get all tags with usage counts
+    ipcMain.handle('get-all-tags', async () => {
+      return await this.database.getAllTags();
+    });
+
+    // Get items by tag
+    ipcMain.handle('get-items-by-tag', async (event, tag) => {
+      return await this.database.getItemsByTag(tag);
+    });
+
     // Delete clipboard item
     ipcMain.handle('delete-clipboard-item', async (event, id) => {
       return await this.database.deleteClipboardItem(id);
@@ -1103,6 +1113,18 @@ class FlowClipApp {
     ipcMain.handle('test-overlay', async () => {
       await this.pasteAssistant.testOverlay();
       return true;
+    });
+
+    // Open external URL in default browser
+    ipcMain.handle('open-external', async (event, url) => {
+      try {
+        console.log(`Opening external URL: ${url}`);
+        await shell.openExternal(url);
+        return { success: true };
+      } catch (error) {
+        console.error('Error opening external URL:', error);
+        return { success: false, error: error.message };
+      }
     });
   }
 }
