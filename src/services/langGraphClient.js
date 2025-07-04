@@ -39,6 +39,7 @@ class LangGraphClient {
       await this.setupHotelResearchWorkflow();
       await this.setupSessionResearchConsolidationWorkflow();
       await this.setupResearchQueryGenerationWorkflow();
+      await this.setupActionableLinksWorkflow();
       
       console.log('LangGraph: All streamlined workflows initialized successfully');
       console.log('LangGraph: Reduced from 9 workflows to 7 (includes new research query generation)');
@@ -3171,6 +3172,234 @@ Generate ONE highly targeted research query that will provide the most comprehen
       console.error('LangGraph: Failed to initialize client:', error);
       throw error;
     }
+  }
+
+  /**
+   * Actionable Links Generation Workflow - Convert recommendations to web links
+   */
+  async setupActionableLinksWorkflow() {
+    const workflow = new StateGraph({
+      channels: {
+        nextSteps: Array,           // Input: text recommendations
+        sessionContext: Object,     // Session type, entities, location
+        researchData: Object,       // Existing research findings
+        actionableLinks: Array,     // Output: recommendations with links
+        searchQueries: Array,       // Generated search queries
+        searchResults: Array,       // Web search results
+        linkConfidence: Number      // Overall link quality score
+      }
+    });
+
+    // Step 1: Generate targeted search queries for each recommendation
+    workflow.addNode("generate_link_queries", async (state) => {
+      try {
+        console.log('LangGraph: Generating search queries for actionable links');
+        
+        const sessionContext = state.sessionContext || {};
+        const entities = sessionContext.entities || [];
+        const location = sessionContext.location || '';
+        const sessionType = sessionContext.sessionType || '';
+        
+        const searchQueries = [];
+        
+        for (const step of state.nextSteps) {
+          const stepText = typeof step === 'string' ? step : step.text || step;
+          
+          const systemPrompt = `Generate a highly specific web search query to find direct actionable links for this recommendation.
+
+CONTEXT:
+- Session Type: ${sessionType}
+- Entities: ${entities.join(', ') || 'none'}
+- Location: ${location || 'none'}
+- Recommendation: "${stepText}"
+
+SEARCH STRATEGY:
+1. Focus on official websites and direct booking/action platforms
+2. Include specific entity names and locations when relevant
+3. Use site-specific searches for known platforms (site:booking.com, site:opentable.com, etc.)
+4. Prioritize actionable pages over informational content
+
+Return JSON with ONE highly targeted search query:
+{
+  "searchQuery": "specific search query for direct action links",
+  "linkType": "booking|official|review|search|reservation|purchase",
+  "expectedSites": ["expected1.com", "expected2.com"],
+  "reasoning": "why this query will find actionable links"
+}`;
+
+          const messages = [
+            new SystemMessage(systemPrompt),
+            new HumanMessage(stepText)
+          ];
+          
+          const response = await this.llm.invoke(messages);
+          
+          let queryData;
+          try {
+            queryData = JSON.parse(response.content);
+          } catch (parseError) {
+            queryData = {
+              searchQuery: this.generateFallbackQuery(stepText, entities, location, sessionType),
+              linkType: this.determineLinkType(stepText, sessionType),
+              expectedSites: this.getExpectedSites(sessionType),
+              reasoning: `Fallback query for: ${stepText}`
+            };
+          }
+
+          searchQueries.push({
+            originalStep: stepText,
+            ...queryData
+          });
+        }
+        
+        console.log(`LangGraph: Generated ${searchQueries.length} search queries for actionable links`);
+        
+        return {
+          ...state,
+          searchQueries: searchQueries
+        };
+        
+      } catch (error) {
+        console.error('LangGraph: Error generating link queries:', error);
+        
+        // Fallback: create basic search queries
+        const fallbackQueries = state.nextSteps.map(step => {
+          const stepText = typeof step === 'string' ? step : step.text || step;
+          return {
+            originalStep: stepText,
+            searchQuery: `${stepText} online`,
+            linkType: 'search',
+            expectedSites: ['google.com'],
+            reasoning: 'Fallback search query'
+          };
+        });
+        
+        return {
+          ...state,
+          searchQueries: fallbackQueries
+        };
+      }
+    });
+
+    // Step 2: Create final actionable links (simplified - no web search for now)
+    workflow.addNode("create_actionable_links", async (state) => {
+      try {
+        console.log('LangGraph: Creating final actionable links');
+        
+        const actionableLinks = [];
+        let totalConfidence = 0;
+        
+        for (const queryData of state.searchQueries) {
+          // Create Google search URL as fallback
+          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryData.searchQuery)}`;
+          const confidence = 0.7; // Basic confidence for search links
+          
+          actionableLinks.push({
+            text: queryData.originalStep,  // Keep original text unchanged
+            link: searchUrl,
+            linkType: queryData.linkType,
+            confidence: confidence,
+            description: `Search for: ${queryData.originalStep}`,
+            searchQuery: queryData.searchQuery
+          });
+          
+          totalConfidence += confidence;
+        }
+        
+        const avgConfidence = actionableLinks.length > 0 ? totalConfidence / actionableLinks.length : 0;
+        
+        console.log(`LangGraph: Created ${actionableLinks.length} actionable links with average confidence: ${avgConfidence.toFixed(2)}`);
+        
+        return {
+          ...state,
+          actionableLinks: actionableLinks,
+          linkConfidence: avgConfidence
+        };
+        
+      } catch (error) {
+        console.error('LangGraph: Error creating actionable links:', error);
+        
+        // Final fallback: convert all steps to Google searches
+        const fallbackLinks = state.nextSteps.map(step => {
+          const stepText = typeof step === 'string' ? step : step.text || step;
+          return {
+            text: stepText,
+            link: `https://www.google.com/search?q=${encodeURIComponent(stepText)}`,
+            linkType: 'search',
+            confidence: 0.5,
+            description: `Search for: ${stepText}`,
+            searchQuery: stepText
+          };
+        });
+        
+        return {
+          ...state,
+          actionableLinks: fallbackLinks,
+          linkConfidence: 0.5
+        };
+      }
+    });
+
+    // Define workflow flow
+    workflow.addEdge("generate_link_queries", "create_actionable_links");
+    workflow.addEdge("create_actionable_links", END);
+    workflow.setEntryPoint("generate_link_queries");
+    
+    const compiledWorkflow = workflow.compile();
+    this.workflows.set("actionable_links_generation", compiledWorkflow);
+    console.log('LangGraph: Actionable Links Generation workflow ready');
+  }
+
+  /**
+   * Generate fallback search query when AI fails
+   */
+  generateFallbackQuery(stepText, entities, location, sessionType) {
+    const entity = entities.length > 0 ? entities[0] : '';
+    
+    if (sessionType === 'hotel_research' && stepText.toLowerCase().includes('reservation')) {
+      return `${entity} ${location} hotel booking reservation official website`.trim();
+    } else if (sessionType === 'hotel_research' && stepText.toLowerCase().includes('review')) {
+      return `${entity} ${location} hotel reviews tripadvisor google`.trim();
+    } else if (sessionType === 'restaurant_research' && stepText.toLowerCase().includes('reservation')) {
+      return `${entity} ${location} restaurant reservation opentable book table`.trim();
+    } else if (stepText.toLowerCase().includes('book') || stepText.toLowerCase().includes('purchase')) {
+      return `${entity} buy online official website booking`.trim();
+    }
+    
+    return `${stepText} ${entity} ${location}`.trim();
+  }
+
+  /**
+   * Determine link type based on step text and session type
+   */
+  determineLinkType(stepText, sessionType) {
+    const text = stepText.toLowerCase();
+    
+    if (text.includes('book') || text.includes('reservation') || text.includes('reserve')) {
+      return sessionType === 'restaurant_research' ? 'reservation' : 'booking';
+    } else if (text.includes('review') || text.includes('rating')) {
+      return 'review';
+    } else if (text.includes('buy') || text.includes('purchase')) {
+      return 'purchase';
+    } else if (text.includes('official') || text.includes('website')) {
+      return 'official';
+    }
+    
+    return 'search';
+  }
+
+  /**
+   * Get expected sites for different session types
+   */
+  getExpectedSites(sessionType) {
+    const siteMap = {
+      'hotel_research': ['booking.com', 'expedia.com', 'hotels.com', 'tripadvisor.com'],
+      'restaurant_research': ['opentable.com', 'resy.com', 'yelp.com', 'tripadvisor.com'],
+      'product_research': ['amazon.com', 'bestbuy.com', 'target.com'],
+      'travel_research': ['expedia.com', 'kayak.com', 'booking.com']
+    };
+    
+    return siteMap[sessionType] || ['google.com'];
   }
 }
 
