@@ -36,18 +36,3 @@
 - Your clipboard history is actually a map of your thinking process
 - The magic happens when AI recognizes that "Hotel A" + "Hotel B" = comparison research session
 
-## SpikyPOV 7: The Local-First AI Revolution
-**Privacy-conscious users want AI benefits without cloud dependency**
-- FlowClip processes locally but leverages cloud AI only when explicitly beneficial
-- The future isn't "cloud AI" or "local AI" - it's intelligent hybrid processing
-- Users should control exactly what data leaves their device and why
-
-## SpikyPOV 8: The Actionable Intelligence Standard
-**Information without action is just digital clutter**
-- FlowClip doesn't just summarize - it generates clickable next steps
-- Research recommendations should link directly to booking sites, not just list suggestions
-- AI insights are worthless unless they immediately reduce user friction
-
----
-
-This brainlift challenges conventional thinking about clipboard management by positioning FlowClip as an invisible, intelligent research assistant that understands user intent through natural copy-paste behavior rather than explicit commands. 
