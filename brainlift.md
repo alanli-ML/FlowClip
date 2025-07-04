@@ -1,7 +1,5 @@
 # FlowClip BrainLift: Rethinking Clipboard Intelligence
 
-Based on the [GauntletAI BrainLifts framework](https://docs.google.com/presentation/d/1yymGU_qJihs44yTqJot0g4zhULFaoDEJJR6q5xTCOw0/edit?slide=id.g3237689c04e_0_526#slide=id.g3237689c04e_0_526), here's a brainlift consisting of several spikypovs:
-
 ## SpikyPOV 1: The Invisibility Principle
 **Copy-paste is the most natural method of capturing input the user is interested in**
 - Requiring the user to paste input into your app in order to process it is already one step too much
