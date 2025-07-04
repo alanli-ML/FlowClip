@@ -263,9 +263,6 @@ class FlowClipRenderer {
       case 'history':
         this.clipboardManager.loadClipboardHistory();
         break;
-      case 'search':
-        this.loadSearchView();
-        break;
       case 'sessions':
         this.sessionUIManager.loadSessionsView();
         break;
@@ -281,9 +278,7 @@ class FlowClipRenderer {
     }
   }
 
-  async loadSearchView() {
-    this.clipboardManager.loadClipboardHistory();
-  }
+
 
   async loadTagsView() {
     const tagsContainer = document.getElementById('tags-container');
@@ -564,7 +559,6 @@ class FlowClipRenderer {
   handleContextualSearch(value) {
     switch (this.currentView) {
       case 'history':
-      case 'search':
         this.clipboardManager.handleSearch(value);
         break;
       case 'sessions':
@@ -586,7 +580,6 @@ class FlowClipRenderer {
   handleContextualFilter() {
     switch (this.currentView) {
       case 'history':
-      case 'search':
         this.clipboardManager.applyFilters();
         break;
       case 'sessions':
@@ -606,11 +599,6 @@ class FlowClipRenderer {
     switch (viewName) {
       case 'history':
         searchInput.placeholder = 'Search clipboard history...';
-        searchFilters.style.display = 'flex';
-        this.showClipboardFilters();
-        break;
-      case 'search':
-        searchInput.placeholder = 'Search clipboard items...';
         searchFilters.style.display = 'flex';
         this.showClipboardFilters();
         break;

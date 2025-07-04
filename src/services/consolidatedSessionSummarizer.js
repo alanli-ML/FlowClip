@@ -18,7 +18,7 @@ class ConsolidatedSessionSummarizer {
       // Add safety checks for input parameters
       if (!session) {
         console.log('ConsolidatedSessionSummarizer: No session provided, using fallback');
-        return this.generateFallbackSummary({ entitiesResearched: ['research'], aspectsCovered: ['general'], organizedFindings: [], allResearchContent: [], totalSources: 0, totalFindings: 0, researchQuality: 'none' }, { session_type: 'general_research' });
+        return await this.generateFallbackSummary({ entitiesResearched: ['research'], aspectsCovered: ['general'], organizedFindings: [], allResearchContent: [], totalSources: 0, totalFindings: 0, researchQuality: 'none' }, { session_type: 'general_research' });
       }
       
       const safeResearchResults = researchResults || [];
@@ -110,6 +110,105 @@ class ConsolidatedSessionSummarizer {
         };
       }
     }
+  }
+
+  /**
+   * Enhance next steps with actionable links using the LangGraph workflow
+   */
+  async enhanceNextStepsWithLinks(nextSteps, sessionContext) {
+    try {
+      console.log('ConsolidatedSessionSummarizer: Enhancing next steps with actionable links');
+      
+      // Check if LangGraph is available
+      if (!this.aiService?.langGraphClient) {
+        console.log('ConsolidatedSessionSummarizer: LangGraph not available, keeping text-only next steps');
+        return nextSteps.map(step => ({
+          text: step,
+          link: null,
+          linkType: 'none',
+          confidence: 0
+        }));
+      }
+
+      // Extract entities and location from session context
+      const entities = sessionContext.entities?.map(e => e.name) || [];
+      const location = this.extractLocationFromContext(sessionContext);
+      
+      const linkWorkflowInput = {
+        nextSteps: nextSteps,
+        sessionContext: {
+          sessionType: sessionContext.sessionType,
+          entities: entities,
+          location: location,
+          researchFindings: sessionContext.keyFindings || []
+        }
+      };
+
+      // Execute the actionable links workflow
+      const linkResults = await this.aiService.langGraphClient.executeWorkflow('actionable_links_generation', linkWorkflowInput);
+      
+      if (linkResults && linkResults.actionableLinks && Array.isArray(linkResults.actionableLinks)) {
+        console.log(`ConsolidatedSessionSummarizer: Successfully generated ${linkResults.actionableLinks.length} actionable links`);
+        return linkResults.actionableLinks;
+      } else {
+        console.log('ConsolidatedSessionSummarizer: Link generation returned invalid results, using fallback');
+        return this.createFallbackLinks(nextSteps, entities, location, sessionContext.sessionType);
+      }
+      
+    } catch (error) {
+      console.error('ConsolidatedSessionSummarizer: Error enhancing next steps with links:', error.message);
+      return this.createFallbackLinks(nextSteps, sessionContext.entities?.map(e => e.name) || [], this.extractLocationFromContext(sessionContext), sessionContext.sessionType);
+    }
+  }
+
+  /**
+   * Create fallback Google search links when actionable link generation fails
+   */
+  createFallbackLinks(nextSteps, entities, location, sessionType) {
+    return nextSteps.map(step => {
+      const entity = entities.length > 0 ? entities[0] : '';
+      const searchQuery = `${step} ${entity} ${location}`.trim();
+      
+      return {
+        text: step,
+        link: `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`,
+        linkType: 'search',
+        confidence: 0.3,
+        description: `Search for: ${step}`,
+        searchQuery: searchQuery
+      };
+    });
+  }
+
+  /**
+   * Extract location information from session context
+   */
+  extractLocationFromContext(sessionContext) {
+    // Try to extract location from various sources
+    const entities = sessionContext.entities || [];
+    const keyFindings = sessionContext.keyFindings || [];
+    
+    // Look for location patterns in entities
+    for (const entity of entities) {
+      if (entity.originalContent) {
+        const locationMatch = entity.originalContent.match(/\b(Toronto|Montreal|Vancouver|New York|Los Angeles|Chicago|Boston|Austin|Miami|Seattle|Portland|Denver|Las Vegas|London|Paris|Tokyo|Sydney|San Francisco|Washington|Atlanta|Dallas|Houston|Phoenix|San Diego|Philadelphia|Detroit|Minneapolis|Tampa|Orlando|Sacramento|Nashville|Memphis|Louisville|Indianapolis|Columbus|Cleveland|Cincinnati|Pittsburgh|Buffalo|Rochester|Albany|Richmond|Norfolk|Raleigh|Charlotte|Charleston|Savannah|Jacksonville|Tallahassee|Gainesville|Pensacola|Mobile|Birmingham|Montgomery|Huntsville|Jackson|Little Rock|Oklahoma City|Tulsa|Kansas City|St. Louis|Des Moines|Omaha|Lincoln|Topeka|Wichita|Salt Lake City|Boise|Helena|Billings|Cheyenne|Denver|Colorado Springs|Albuquerque|Santa Fe|Tucson|Flagstaff|Reno|Carson City|Portland|Eugene|Salem|Spokane|Tacoma|Olympia|Anchorage|Fairbanks|Honolulu|Maui)\b/i);
+        if (locationMatch) {
+          return locationMatch[1];
+        }
+      }
+    }
+    
+    // Look for location patterns in key findings
+    for (const finding of keyFindings) {
+      if (typeof finding === 'string') {
+        const locationMatch = finding.match(/\b(Toronto|Montreal|Vancouver|New York|Los Angeles|Chicago|Boston|Austin|Miami|Seattle|Portland|Denver|Las Vegas|London|Paris|Tokyo|Sydney)\b/i);
+        if (locationMatch) {
+          return locationMatch[1];
+        }
+      }
+    }
+    
+    return '';
   }
 
   /**
@@ -1117,7 +1216,16 @@ class ConsolidatedSessionSummarizer {
   /**
    * Format and structure the workflow result
    */
-  formatWorkflowResult(result, processedData, session) {
+  async formatWorkflowResult(result, processedData, session) {
+    const nextSteps = Array.isArray(result.nextSteps) ? result.nextSteps : (result.actions ? [result.actions] : ['Review findings']);
+    
+    // Enhance next steps with actionable links
+    const enhancedNextSteps = await this.enhanceNextStepsWithLinks(nextSteps, {
+      sessionType: session.session_type,
+      entities: processedData.entitiesResearched?.map(name => ({ name, originalContent: name })) || [],
+      keyFindings: processedData.organizedFindings.map(f => f.finding)
+    });
+
     return {
       sessionId: session.id,
       researchObjective: result.researchObjective || result.objective || `${session.session_type.replace('_', ' ')} analysis`,
@@ -1125,7 +1233,7 @@ class ConsolidatedSessionSummarizer {
       primaryIntent: result.primaryIntent || result.intent || 'Information gathering and analysis',
       keyFindings: processedData.organizedFindings.map(f => f.finding),
       researchGoals: Array.isArray(result.researchGoals) ? result.researchGoals : (result.goals ? [result.goals] : ['Complete comprehensive analysis']),
-      nextSteps: Array.isArray(result.nextSteps) ? result.nextSteps : (result.actions ? [result.actions] : ['Review findings']),
+      nextSteps: enhancedNextSteps,
       entitiesResearched: processedData.entitiesResearched,
       aspectsCovered: processedData.aspectsCovered,
       totalSources: processedData.totalSources,
@@ -1144,7 +1252,7 @@ class ConsolidatedSessionSummarizer {
   /**
    * Generate fallback summary when AI is not available
    */
-  generateFallbackSummary(processedData, session) {
+  async generateFallbackSummary(processedData, session) {
     console.log('ConsolidatedSessionSummarizer: Generating fallback summary');
     
     const entities = processedData.entitiesResearched;
@@ -1165,6 +1273,13 @@ class ConsolidatedSessionSummarizer {
     // Generate basic goals and next steps based on session type
     const { goals, nextSteps } = this.generateFallbackGoalsAndSteps(sessionType, entities);
 
+    // Enhance next steps with actionable links
+    const enhancedNextSteps = await this.enhanceNextStepsWithLinks(nextSteps, {
+      sessionType: sessionType,
+      entities: entities.map(name => ({ name, originalContent: name })),
+      keyFindings: processedData.organizedFindings.map(f => f.finding)
+    });
+
     return {
       sessionId: session.id,
       researchObjective: objective,
@@ -1172,7 +1287,7 @@ class ConsolidatedSessionSummarizer {
       primaryIntent: entities.length > 1 ? `Compare ${entities.slice(0, 2).join(' and ')}` : `Research ${entities[0] || 'information'}`,
       keyFindings: processedData.organizedFindings.map(f => f.finding),
       researchGoals: goals,
-      nextSteps: nextSteps,
+      nextSteps: enhancedNextSteps,
       entitiesResearched: processedData.entitiesResearched,
       aspectsCovered: processedData.aspectsCovered,
       totalSources: processedData.totalSources,
@@ -1347,7 +1462,7 @@ class ConsolidatedSessionSummarizer {
   /**
    * Format comparison analysis result
    */
-  formatComparisonResult(result, entityAnalysis, organizedData, session) {
+  async formatComparisonResult(result, entityAnalysis, organizedData, session) {
     const entities = entityAnalysis.entities;
     const comparisonMatrix = result.comparisonMatrix || {};
     
@@ -1371,6 +1486,14 @@ class ConsolidatedSessionSummarizer {
     const allSources = Object.values(organizedData).flatMap(entity => 
       entity.research.flatMap(r => r.sources)
     );
+
+    // Create next steps from recommendations and enhance with links
+    const nextSteps = recommendations.map(r => `${r.scenario}: Choose ${r.entity}`).slice(0, 3);
+    const enhancedNextSteps = await this.enhanceNextStepsWithLinks(nextSteps, {
+      sessionType: session.session_type,
+      entities: entities,
+      keyFindings: allFindings.slice(0, 15)
+    });
     
     return {
       sessionId: session.id,
@@ -1379,7 +1502,7 @@ class ConsolidatedSessionSummarizer {
       primaryIntent: result.primaryIntent || `Compare and select between ${entities.length} ${entities[0]?.type || 'options'}`,
       keyFindings: allFindings.slice(0, 15),
       researchGoals: result.researchGoals || [`Compare ${entities.map(e => e.name).join(' and ')}`, 'Identify best option', 'Make informed decision'],
-      nextSteps: recommendations.map(r => `${r.scenario}: Choose ${r.entity}`).slice(0, 3),
+      nextSteps: enhancedNextSteps,
       entitiesResearched: entities.map(e => e.name),
       aspectsCovered: entityAnalysis.comparisonDimensions,
       totalSources: allSources.length,

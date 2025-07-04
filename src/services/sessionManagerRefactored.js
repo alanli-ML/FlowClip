@@ -780,6 +780,37 @@ class SessionManagerRefactored extends EventEmitter {
     return this.analysisWorkflow.updateComprehensiveSessionAnalysis(sessionId);
   }
 
+  async searchSessions(query) {
+    try {
+      const searchTerm = `%${query.toLowerCase()}%`;
+      
+      // Search sessions by label, type, and content
+      const sessions = await this.dbUtils.select(`
+        SELECT DISTINCT s.*, COUNT(sm.clipboard_item_id) as item_count
+        FROM clipboard_sessions s
+        LEFT JOIN session_members sm ON s.id = sm.session_id
+        LEFT JOIN clipboard_items ci ON sm.clipboard_item_id = ci.id
+        WHERE (
+          LOWER(s.session_label) LIKE ? 
+          OR LOWER(s.session_type) LIKE ?
+          OR LOWER(s.context_summary) LIKE ?
+          OR LOWER(s.intent_analysis) LIKE ?
+          OR LOWER(ci.content) LIKE ?
+          OR LOWER(ci.source_app) LIKE ?
+          OR LOWER(ci.window_title) LIKE ?
+        )
+        GROUP BY s.id
+        ORDER BY s.last_activity DESC
+      `, [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm]);
+      
+      SessionLogger.log(`Found ${sessions.length} sessions matching query: "${query}"`);
+      return sessions;
+    } catch (error) {
+      SessionLogger.error('Error searching sessions', '', error);
+      return [];
+    }
+  }
+
   destroy() {
     if (this.sessionCleanupInterval) {
       clearInterval(this.sessionCleanupInterval);

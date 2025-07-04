@@ -298,21 +298,16 @@ class Database {
   async searchClipboardItems(query) {
     // Use FTS for semantic search
     const stmt = this.db.prepare(`
-      SELECT c.*, ts.rank
-      FROM clipboard_search s
-      JOIN clipboard_items c ON s.id = c.id
-      LEFT JOIN (
-        SELECT id, bm25(clipboard_search) as rank
-        FROM clipboard_search
-        WHERE clipboard_search MATCH ?
-      ) ts ON c.id = ts.id
-      WHERE s MATCH ?
-      ORDER BY ts.rank, c.timestamp DESC
+      SELECT c.*, bm25(clipboard_search) as rank
+      FROM clipboard_search
+      JOIN clipboard_items c ON clipboard_search.id = c.id
+      WHERE clipboard_search MATCH ?
+      ORDER BY bm25(clipboard_search), c.timestamp DESC
       LIMIT 20
     `);
 
     const searchQuery = query.replace(/[^\w\s]/g, '').trim();
-    const rows = stmt.all(searchQuery, searchQuery);
+    const rows = stmt.all(searchQuery);
 
     return rows.map(row => ({
       ...row,
