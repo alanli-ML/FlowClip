@@ -12,6 +12,7 @@ class SessionUIManager {
     this.currentSession = null;
     this.currentModalSessionId = null;
     this.sessionListRefreshTimeout = null;
+    this.searchTimeout = null;
   }
 
   /**
@@ -852,6 +853,34 @@ class SessionUIManager {
       }
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Handle search input for sessions
+   */
+  handleSearch(query) {
+    if (this.searchTimeout) {
+      clearTimeout(this.searchTimeout);
+    }
+
+    this.searchTimeout = setTimeout(async () => {
+      if (!query.trim()) {
+        this.loadSessionsView();
+        return;
+      }
+
+      try {
+        this.uiRenderer.showLoading(true);
+        const results = await this.ipcRenderer.invoke('search-sessions', query);
+        this.currentSessions = results || [];
+        this.renderSessions(results);
+      } catch (error) {
+        console.error('Error searching sessions:', error);
+        this.uiRenderer.showToast('Error searching sessions', 'error');
+      } finally {
+        this.uiRenderer.showLoading(false);
+      }
+    }, 300);
   }
 }
 

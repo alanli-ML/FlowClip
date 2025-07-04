@@ -2058,6 +2058,39 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  async searchSessions(query) {
+    try {
+      const searchTerm = `%${query.toLowerCase()}%`;
+      
+      // Search sessions by label, type, and content
+      const stmt = this.database.db.prepare(`
+        SELECT DISTINCT s.*, COUNT(sm.clipboard_item_id) as item_count
+        FROM clipboard_sessions s
+        LEFT JOIN session_members sm ON s.id = sm.session_id
+        LEFT JOIN clipboard_items ci ON sm.clipboard_item_id = ci.id
+        WHERE (
+          LOWER(s.session_label) LIKE ? 
+          OR LOWER(s.session_type) LIKE ?
+          OR LOWER(s.context_summary) LIKE ?
+          OR LOWER(s.intent_analysis) LIKE ?
+          OR LOWER(ci.content) LIKE ?
+          OR LOWER(ci.source_app) LIKE ?
+          OR LOWER(ci.window_title) LIKE ?
+        )
+        GROUP BY s.id
+        ORDER BY s.last_activity DESC
+      `);
+      
+      const results = stmt.all(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      
+      console.log(`SessionManager: Found ${results.length} sessions matching query: "${query}"`);
+      return results;
+    } catch (error) {
+      console.error('SessionManager: Error searching sessions:', error);
+      return [];
+    }
+  }
+
   async analyzeItemIntent(clipboardItem) {
     try {
       console.log(`SessionManager: Analyzing intent for item: "${clipboardItem.content.substring(0, 50)}..."`);

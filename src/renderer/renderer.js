@@ -30,6 +30,9 @@ class FlowClipRenderer {
     this.setupEventListeners();
     this.clipboardManager.loadClipboardHistory();
     this.setupIPCListeners();
+    
+    // Initialize search context for the default view
+    this.updateSearchContext(this.currentView);
   }
 
   async loadSettings() {
@@ -73,27 +76,27 @@ class FlowClipRenderer {
       });
     });
 
-    // Search
+    // Search - context-aware
     const searchInput = document.getElementById('search-input');
     searchInput.addEventListener('input', (e) => {
-      this.clipboardManager.handleSearch(e.target.value);
+      this.handleContextualSearch(e.target.value);
     });
 
     // Search filters
     document.getElementById('content-type-filter').addEventListener('change', () => {
-      this.clipboardManager.applyFilters();
+      this.handleContextualFilter();
     });
     document.getElementById('source-app-filter').addEventListener('change', () => {
-      this.clipboardManager.applyFilters();
+      this.handleContextualFilter();
     });
     document.getElementById('date-filter').addEventListener('change', () => {
-      this.clipboardManager.applyFilters();
+      this.handleContextualFilter();
     });
 
     // Clear search
     document.getElementById('clear-search').addEventListener('click', () => {
       document.getElementById('search-input').value = '';
-      this.clipboardManager.loadClipboardHistory();
+      this.handleContextualSearch('');
     });
 
     // Refresh buttons
@@ -252,6 +255,9 @@ class FlowClipRenderer {
     document.getElementById(`${viewName}-view`).classList.add('active');
 
     this.currentView = viewName;
+
+    // Update search context based on current view
+    this.updateSearchContext(viewName);
 
     switch (viewName) {
       case 'history':
@@ -534,8 +540,6 @@ class FlowClipRenderer {
     this.sessionUIManager.showHotelResearchAlert(data);
   }
 
-
-
   // Exposed methods for global access
   triggerActionFromButton(itemId, action) {
     return this.clipboardManager.triggerActionFromButton(itemId, action);
@@ -555,6 +559,143 @@ class FlowClipRenderer {
 
   openSessionDetails(sessionId) {
     return this.sessionUIManager.openSessionDetails(sessionId);
+  }
+
+  handleContextualSearch(value) {
+    switch (this.currentView) {
+      case 'history':
+      case 'search':
+        this.clipboardManager.handleSearch(value);
+        break;
+      case 'sessions':
+        this.sessionUIManager.handleSearch(value);
+        break;
+      case 'tags':
+        // TODO: Implement tag search if needed
+        break;
+      case 'stats':
+        // Stats view doesn't need search
+        break;
+      default:
+        // Default to clipboard search
+        this.clipboardManager.handleSearch(value);
+        break;
+    }
+  }
+
+  handleContextualFilter() {
+    switch (this.currentView) {
+      case 'history':
+      case 'search':
+        this.clipboardManager.applyFilters();
+        break;
+      case 'sessions':
+        this.sessionUIManager.applySessionFilters();
+        break;
+      default:
+        // Default to clipboard filters
+        this.clipboardManager.applyFilters();
+        break;
+    }
+  }
+
+  updateSearchContext(viewName) {
+    const searchInput = document.getElementById('search-input');
+    const searchFilters = document.querySelector('.search-filters');
+    
+    switch (viewName) {
+      case 'history':
+        searchInput.placeholder = 'Search clipboard history...';
+        searchFilters.style.display = 'flex';
+        this.showClipboardFilters();
+        break;
+      case 'search':
+        searchInput.placeholder = 'Search clipboard items...';
+        searchFilters.style.display = 'flex';
+        this.showClipboardFilters();
+        break;
+      case 'sessions':
+        searchInput.placeholder = 'Search sessions...';
+        searchFilters.style.display = 'flex';
+        this.showSessionFilters();
+        break;
+      case 'tags':
+        searchInput.placeholder = 'Search tags...';
+        searchFilters.style.display = 'none';
+        break;
+      case 'stats':
+        searchInput.placeholder = 'Search not available';
+        searchFilters.style.display = 'none';
+        break;
+      case 'settings':
+        searchInput.placeholder = 'Search settings...';
+        searchFilters.style.display = 'none';
+        break;
+      default:
+        searchInput.placeholder = 'Search...';
+        searchFilters.style.display = 'none';
+        break;
+    }
+  }
+
+  showClipboardFilters() {
+    const filtersContainer = document.querySelector('.search-filters');
+    filtersContainer.innerHTML = `
+      <select id="content-type-filter">
+        <option value="">All Types</option>
+        <option value="TEXT">Text</option>
+        <option value="IMAGE">Image</option>
+        <option value="FILE">File</option>
+      </select>
+      <select id="source-app-filter">
+        <option value="">All Apps</option>
+      </select>
+      <input type="date" id="date-filter">
+    `;
+    
+    // Re-attach event listeners for the new elements
+    document.getElementById('content-type-filter').addEventListener('change', () => {
+      this.handleContextualFilter();
+    });
+    document.getElementById('source-app-filter').addEventListener('change', () => {
+      this.handleContextualFilter();
+    });
+    document.getElementById('date-filter').addEventListener('change', () => {
+      this.handleContextualFilter();
+    });
+  }
+
+  showSessionFilters() {
+    const filtersContainer = document.querySelector('.search-filters');
+    filtersContainer.innerHTML = `
+      <select id="session-type-filter">
+        <option value="">All Session Types</option>
+        <option value="hotel_research">Hotel Research</option>
+        <option value="restaurant_research">Restaurant Research</option>
+        <option value="product_research">Product Research</option>
+        <option value="academic_research">Academic Research</option>
+        <option value="travel_research">Travel Research</option>
+        <option value="general_research">General Research</option>
+      </select>
+      <select id="session-status-filter">
+        <option value="">All Statuses</option>
+        <option value="active">Active</option>
+        <option value="expired">Expired</option>
+        <option value="completed">Completed</option>
+      </select>
+      <input type="date" id="date-filter" placeholder="Filter by date">
+    `;
+    
+    // Re-attach event listeners for the new elements
+    document.getElementById('session-type-filter').addEventListener('change', () => {
+      this.handleContextualFilter();
+    });
+    document.getElementById('session-status-filter').addEventListener('change', () => {
+      this.handleContextualFilter();
+    });
+    document.getElementById('date-filter').addEventListener('change', () => {
+      this.handleContextualFilter();
+    });
   }
 }
 

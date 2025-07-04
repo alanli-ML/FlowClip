@@ -1009,6 +1009,11 @@ class FlowClipApp {
       return await this.sessionManager.getSessionsByType(sessionType);
     });
 
+    // Search sessions
+    ipcMain.handle('search-sessions', async (event, query) => {
+      return await this.sessionManager.searchSessions(query);
+    });
+
     // Clear all sessions
     ipcMain.handle('clear-all-sessions', async () => {
       return await this.sessionManager.clearAllSessions();

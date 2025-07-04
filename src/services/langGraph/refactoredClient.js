@@ -13,6 +13,7 @@ const {
   CACHE_SETTINGS, 
   MODEL_CONFIGS 
 } = require('./constants');
+const ActionableLinksWorkflow = require('./workflows/actionableLinksWorkflow');
 
 class LangGraphClient {
   constructor() {
@@ -22,6 +23,7 @@ class LangGraphClient {
     this.isInitialized = false;
     this.progressCallback = null;
     this.visionAnalysisCache = new CacheManager(CACHE_SETTINGS.VISION_CACHE_MAX_AGE);
+    this.actionableLinksWorkflow = null;
   }
 
   setProgressCallback(callback) {
@@ -39,6 +41,7 @@ class LangGraphClient {
       await this.setupComprehensiveContentAnalysisWorkflow();
       await this.setupOptimizedSummarizationWorkflow();
       await this.setupResearchWorkflow();
+      await this.setupActionableLinksWorkflow();
       
       Logger.log('All streamlined workflows initialized successfully');
     } catch (error) {
@@ -212,6 +215,13 @@ Use only these actions: ${ALLOWED_ACTIONS.join(', ')}`;
     
     this.workflows.set("research", workflow.compile());
     Logger.log('Research workflow ready');
+  }
+
+  async setupActionableLinksWorkflow() {
+    this.actionableLinksWorkflow = new ActionableLinksWorkflow(this.llm);
+    const workflow = await this.actionableLinksWorkflow.setupActionableLinksGenerationWorkflow();
+    this.workflows.set("actionable_links_generation", workflow);
+    Logger.log('Actionable Links Generation workflow ready');
   }
 
   async executeWorkflow(workflowName, initialState) {
