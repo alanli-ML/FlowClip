@@ -374,9 +374,9 @@ class FlowClipApp {
 
   createMainWindow() {
     this.mainWindow = new BrowserWindow({
-      width: 800,
+      width: 1000,
       height: 600,
-      minWidth: 600,
+      minWidth: 700,
       minHeight: 400,
       webPreferences: {
         nodeIntegration: true,

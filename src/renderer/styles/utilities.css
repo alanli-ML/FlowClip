@@ -293,10 +293,6 @@
   }
 
   /* Sessions responsive */
-  .sessions-filter {
-    flex-direction: column;
-    gap: 8px;
-  }
   
   .session-header {
     flex-direction: column;

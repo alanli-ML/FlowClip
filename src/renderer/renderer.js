@@ -318,7 +318,8 @@ class FlowClipRenderer {
 
     const totalItems = tags.reduce((sum, tag) => sum + tag.count, 0);
     
-    tagsContainer.innerHTML = `
+    // Create the header
+    const headerHTML = `
       <div class="tags-header">
         <div class="tags-stats">
           <div class="stat-item">
@@ -331,32 +332,55 @@ class FlowClipRenderer {
           </div>
         </div>
       </div>
-      
-      <div class="tags-grid">
-        ${tags.map(tag => `
-          <div class="tag-card" data-tag="${tag.tag}">
-            <div class="tag-name">${FormatUtils.escapeHtml(tag.tag)}</div>
-            <div class="tag-count">${tag.count} item${tag.count !== 1 ? 's' : ''}</div>
-            <div class="tag-actions">
-              <button class="btn btn-sm btn-outline" onclick="window.flowClipRenderer.viewTagItems('${FormatUtils.escapeHtml(tag.tag)}')">
-                <i class="fas fa-eye"></i>
-                View Items
-              </button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
     `;
 
-    // Add click handlers for tag cards
-    tagsContainer.querySelectorAll('.tag-card').forEach(element => {
-      element.addEventListener('click', (e) => {
+    // Create the tags grid container
+    const tagsGridHTML = '<div class="tags-grid"></div>';
+    
+    tagsContainer.innerHTML = headerHTML + tagsGridHTML;
+    
+    // Get the grid container and add tag cards
+    const tagsGrid = tagsContainer.querySelector('.tags-grid');
+    
+    tags.forEach(tag => {
+      const tagCard = document.createElement('div');
+      tagCard.className = 'tag-card';
+      tagCard.dataset.tag = tag.tag;
+      
+      tagCard.innerHTML = `
+        <div class="tag-name">${this.escapeHtml(tag.tag)}</div>
+        <div class="tag-count">${tag.count} item${tag.count !== 1 ? 's' : ''}</div>
+        <div class="tag-actions">
+          <button class="btn btn-sm btn-outline" data-tag-action="view">
+            <i class="fas fa-eye"></i>
+            View Items
+          </button>
+        </div>
+      `;
+      
+      tagsGrid.appendChild(tagCard);
+      
+      // Add click handlers
+      tagCard.addEventListener('click', (e) => {
         if (!e.target.closest('.tag-actions')) {
-          const tag = element.dataset.tag;
-          this.viewTagItems(tag);
+          this.viewTagItems(tag.tag);
         }
       });
+      
+      // Add button click handler
+      const viewButton = tagCard.querySelector('[data-tag-action="view"]');
+      viewButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.viewTagItems(tag.tag);
+      });
     });
+  }
+
+  escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   async viewTagItems(tag) {
@@ -571,10 +595,16 @@ class FlowClipRenderer {
     this.uiRenderer.showToast('Session research has started', 'info');
     
     if (this.currentView === 'sessions' && this.sessionUIManager.getCurrentModalSessionId() === data.sessionId) {
-      console.log('Showing loading indicator for session research...');
-      this.uiRenderer.showSessionResearchLoading(
-        document.getElementById('session-intent-analysis')
-      );
+      console.log('Showing research progress status bar for session research...');
+      
+      // Immediately create and show the research progress bar with initial status
+      this.sessionUIManager.updateSessionResearchProgress({
+        sessionId: data.sessionId,
+        phase: 'initializing',
+        progress: 0,
+        currentStatus: 'Starting session research...',
+        message: 'Analyzing session content and preparing research queries'
+      });
     }
   }
 

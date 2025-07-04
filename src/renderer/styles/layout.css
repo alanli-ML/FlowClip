@@ -15,6 +15,8 @@
   display: flex;
   align-items: center;
   gap: 20px;
+  /* Add left padding on macOS to avoid overlap with traffic light buttons */
+  padding-left: 80px;
 }
 
 .logo {
@@ -234,4 +236,36 @@
   border-radius: var(--border-radius-sm);
   color: var(--text-primary);
   font-size: 13px;
+}
+
+/* Responsive adjustments for header on smaller windows */
+@media (max-width: 768px) {
+  .header-left {
+    padding-left: 70px; /* Slightly less padding on smaller screens */
+    gap: 12px;
+  }
+  
+  .logo {
+    font-size: 14px;
+  }
+  
+  .logo i {
+    font-size: 16px;
+  }
+  
+  .status-indicator {
+    display: none; /* Hide status indicator on very small screens */
+  }
+}
+
+/* Additional spacing for very small windows */
+@media (max-width: 480px) {
+  .header-left {
+    padding-left: 60px;
+    gap: 8px;
+  }
+  
+  .header {
+    padding: 8px 12px;
+  }
 } 

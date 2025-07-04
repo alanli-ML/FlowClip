@@ -344,6 +344,15 @@ class SessionUIManager {
             </div>
           </div>
 
+          ${(intentData?.sessionIntent?.nextSteps && Array.isArray(intentData.sessionIntent.nextSteps) && intentData.sessionIntent.nextSteps.length > 0) ? `
+            <div class="research-next-steps">
+              <h5><i class="fas fa-arrow-right"></i> Recommended Next Steps</h5>
+              <div class="next-steps-list">
+                ${intentData.sessionIntent.nextSteps.map(step => this.renderActionableNextStep(step)).join('')}
+              </div>
+            </div>
+          ` : ''}
+
           ${keyFindings.length > 0 ? `
             <div class="research-findings-section">
               <h5><i class="fas fa-lightbulb"></i> Key Findings</h5>
@@ -390,15 +399,6 @@ class SessionUIManager {
                   <div class="insight-label">Thematic Coherence</div>
                   <div class="insight-value">${FormatUtils.escapeHtml(sessionResearch.sessionInsights.thematicCoherence || 'Unknown')}</div>
                 </div>
-              </div>
-            </div>
-          ` : ''}
-
-          ${(intentData?.sessionIntent?.nextSteps && Array.isArray(intentData.sessionIntent.nextSteps) && intentData.sessionIntent.nextSteps.length > 0) ? `
-            <div class="research-next-steps">
-              <h5><i class="fas fa-arrow-right"></i> Recommended Next Steps</h5>
-              <div class="next-steps-list">
-                ${intentData.sessionIntent.nextSteps.map(step => this.renderActionableNextStep(step)).join('')}
               </div>
             </div>
           ` : ''}
@@ -815,9 +815,14 @@ class SessionUIManager {
       console.log(`Performing session research for session ${sessionId}...`);
       
       if (this.currentModalSessionId === sessionId) {
-        this.uiRenderer.showSessionResearchLoading(
-          document.getElementById('session-intent-analysis')
-        );
+        // Immediately show the research progress bar with initial status
+        this.updateSessionResearchProgress({
+          sessionId: sessionId,
+          phase: 'initializing',
+          progress: 0,
+          currentStatus: 'Starting session research...',
+          message: 'Analyzing session content and preparing research queries'
+        });
       }
       
       this.uiRenderer.showToast('Starting comprehensive session research...', 'info');
@@ -829,10 +834,13 @@ class SessionUIManager {
       } else {
         console.error('Session research failed:', result.error);
         this.uiRenderer.showToast(`Session research failed: ${result.error}`, 'error');
+        
+        // Hide the progress container on failure
         if (this.currentModalSessionId === sessionId) {
-          this.uiRenderer.hideSessionResearchLoading(
-            document.getElementById('session-intent-analysis')
-          );
+          const progressContainer = document.getElementById('session-research-progress');
+          if (progressContainer) {
+            progressContainer.style.display = 'none';
+          }
         }
       }
       
@@ -841,10 +849,13 @@ class SessionUIManager {
     } catch (error) {
       console.error('Error performing session research:', error);
       this.uiRenderer.showToast(`Session research error: ${error.message}`, 'error');
+      
+      // Hide the progress container on error
       if (this.currentModalSessionId === sessionId) {
-        this.uiRenderer.hideSessionResearchLoading(
-          document.getElementById('session-intent-analysis')
-        );
+        const progressContainer = document.getElementById('session-research-progress');
+        if (progressContainer) {
+          progressContainer.style.display = 'none';
+        }
       }
       return { success: false, error: error.message };
     }
