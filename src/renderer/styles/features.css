@@ -320,7 +320,7 @@
 .session-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 12px;
 }
 
@@ -352,6 +352,7 @@
   display: inline-flex;
   align-items: center;
   height: 20px;
+  align-self: flex-start;
 }
 
 .session-type-badge.hotel_research {
@@ -398,6 +399,7 @@
   display: inline-flex;
   align-items: center;
   height: 20px;
+  align-self: flex-start;
 }
 
 .status-indicator.status-active {
